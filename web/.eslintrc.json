@@ -1,0 +1,13 @@
+{
+  "extends": ["next/core-web-vitals", "prettier"],
+  "rules": {
+    "no-restricted-properties": [
+      "error",
+      {
+        "object": "process",
+        "property": "env",
+        "message": "Read env via lib/env.ts so privileged names cannot leak (Constitution Principle III)."
+      }
+    ]
+  }
+}

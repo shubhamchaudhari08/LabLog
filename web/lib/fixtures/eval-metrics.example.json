@@ -1,0 +1,53 @@
+{
+  "_WARNING": "ILLUSTRATIVE SHAPE FIXTURE ONLY. These numbers are invented so Stream H can build the dashboard before the harness runs. They must NEVER be displayed to a viewer, committed as results, or quoted anywhere. The dashboard reads api/eval/metrics.json, produced by api/eval/run.py.",
+  "generated_at": "2026-09-22T18:30:00Z",
+  "scenario_count": 42,
+  "model": "PLACEHOLDER",
+  "git_sha": "0000000",
+  "metrics": {
+    "tool_selection_accuracy":       { "value": 0.976, "passed": 41, "total": 42 },
+    "argument_accuracy":             { "value": 0.952, "passed": 40, "total": 42 },
+    "sample_id_accuracy":            { "value": 0.968, "passed": 30, "total": 31 },
+    "value_extraction_accuracy":     { "value": 1.0,   "passed": 31, "total": 31 },
+    "ambiguity_clarification_rate":  { "value": 1.0,   "passed": 8,  "total": 8 },
+    "false_record_creation_rate":    { "value": 0.0,   "passed": 42, "total": 42, "lower_is_better": true },
+    "procedure_hallucination_rate":  { "value": 0.0,   "passed": 5,  "total": 5,  "lower_is_better": true },
+    "backend_rejection_correctness": { "value": 1.0,   "passed": 6,  "total": 6 },
+    "task_completion_rate":          { "value": 0.929, "passed": 39, "total": 42 }
+  },
+  "by_category": {
+    "normal_capture": { "total": 15, "passed": 15 },
+    "ambiguity":      { "total": 8,  "passed": 8 },
+    "correction":     { "total": 5,  "passed": 5 },
+    "classification": { "total": 4,  "passed": 4 },
+    "invalid_input":  { "total": 6,  "passed": 6 },
+    "refusal":        { "total": 5,  "passed": 5 },
+    "completion":     { "total": 3,  "passed": 2 }
+  },
+  "failures": [
+    {
+      "scenario_id": "comp_002",
+      "category": "completion",
+      "utterance": "we're done here",
+      "expected": "check_experiment_completeness",
+      "actual": "complete_experiment",
+      "note": "Skipped the completeness check; backend correctly rejected with INCOMPLETE."
+    },
+    {
+      "scenario_id": "norm_011",
+      "category": "normal_capture",
+      "utterance": "control one is four point zero",
+      "expected": { "tool": "record_measurement", "sample_code": "CONTROL-01" },
+      "actual": { "tool": "record_measurement", "sample_code": "CONTROL-1" },
+      "note": "Normalisation map resolved it; scored as an argument miss before normalisation."
+    },
+    {
+      "scenario_id": "amb_007",
+      "category": "ambiguity",
+      "utterance": "and the other one is about the same",
+      "expected": "clarify",
+      "actual": "clarify",
+      "note": "Passed. Retained as an example of a correctly handled hard case."
+    }
+  ]
+}

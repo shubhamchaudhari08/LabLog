@@ -1,0 +1,15 @@
+# LabLog FastAPI backend — complete manifest for all streams (Stream 0 owns this file).
+# Written in full up front so concurrent streams never edit it. See plan.md Stream 0.
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+httpx==0.28.1
+PyJWT==2.10.1
+supabase==2.11.0
+python-dotenv==1.0.1
+
+# --- test + eval ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
+respx==0.22.0
