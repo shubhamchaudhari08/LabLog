@@ -1,0 +1,43 @@
+# ---- Python (api/) ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# ---- Node / Next.js (web/) ----
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vercel/
+
+# ---- Secrets (Constitution Principle III) ----
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.local.example
+
+# ---- Logs & temp ----
+*.log
+npm-debug.log*
+yarn-error.log*
+*.tmp
+*.swp
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ---- Throwaway spike (Stream P, deleted before submission) ----
+spike/out/
