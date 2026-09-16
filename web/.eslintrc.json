@@ -9,5 +9,11 @@
         "message": "Read env via lib/env.ts so privileged names cannot leak (Constitution Principle III)."
       }
     ]
-  }
+  },
+  "overrides": [
+    {
+      "files": ["lib/env.ts"],
+      "rules": { "no-restricted-properties": "off" }
+    }
+  ]
 }

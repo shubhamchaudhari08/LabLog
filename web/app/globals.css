@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens live in tailwind.config.ts, transcribed from DESIGN.md.
+   This file holds only what Tailwind cannot express. */
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-canvas text-body font-sans;
+    font-size: 16px;
+    line-height: 1.55;
+  }
+
+  h1, h2, h3 {
+    @apply font-display text-ink;
+    font-weight: 400;
+  }
+
+  /* Numbers in the measurement table must align in columns and never shift
+     width as they update — a value that jiggles as it lands undercuts the
+     precision the whole product is claiming. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-lg border border-hairline bg-canvas;
+  }
+
+  .panel-header {
+    @apply flex items-center justify-between border-b border-hairline-soft px-lg py-sm;
+  }
+
+  .panel-label {
+    @apply text-caption-upper uppercase text-muted;
+  }
+
+  /* Dark surfaces carry the product chrome — here, the live voice session.
+     DESIGN.md uses them for code editors and terminal panels; the transcript is
+     this application's equivalent. */
+  .panel-dark {
+    @apply rounded-lg bg-surface-dark text-on-dark;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-pill bg-surface-card px-sm py-xxs text-caption text-ink;
+  }
+
+  .badge-coral {
+    @apply inline-flex items-center rounded-pill bg-primary px-sm py-xxs text-caption-upper uppercase text-on-primary;
+  }
+
+  .btn-primary {
+    @apply inline-flex h-10 items-center rounded-md bg-primary px-lg text-[14px] font-medium text-on-primary transition-colors hover:bg-primary-active disabled:bg-primary-disabled disabled:text-muted;
+  }
+
+  .btn-secondary {
+    @apply inline-flex h-10 items-center rounded-md border border-hairline bg-canvas px-lg text-[14px] font-medium text-ink transition-colors hover:bg-surface-soft disabled:text-muted-soft;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
