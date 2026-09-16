@@ -98,7 +98,10 @@ async def call_tool(body: ToolCall, user: User = Depends(get_current_user)) -> d
     if handler is None:  # registered but not yet implemented
         return _fail("UNKNOWN_TOOL", f"Tool {body.tool} is registered but not implemented.")
 
-    # 8. The handler writes the change and its audit event together.
+    # 8. The handler writes the change, then its audit event.
+    #    ponytail: two PostgREST calls, not one transaction — a crash between them
+    #    leaves a row without its event (the quickstart §1.4 query catches it).
+    #    Move writes into a Postgres function called via .rpc() if that matters.
     return handler(
         sb=sb,
         experiment=experiment,

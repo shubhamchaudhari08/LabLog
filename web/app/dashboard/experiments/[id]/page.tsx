@@ -9,6 +9,7 @@
  */
 
 import { useCallback } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -61,6 +62,12 @@ export default function ExperimentWorkspace() {
 
   const voice = useVoiceAgent({ experimentId, onToolSuccess });
 
+  const previousById = Object.fromEntries(
+    (events.data ?? [])
+      .filter((e) => e.event_type === 'MEASUREMENT_CORRECTED')
+      .map((e) => [e.entity_id, Number(e.payload?.from)]),
+  );
+
   const protocol = experiment.data?.protocols as
     | { name?: string; version?: string; steps?: ProtocolStep[] }
     | undefined;
@@ -75,6 +82,9 @@ export default function ExperimentWorkspace() {
         protocolName={protocol?.name}
         protocolVersion={protocol?.version}
       />
+      <Link href="/reliability" className="mt-xs inline-block text-caption text-primary hover:text-primary-active">
+        Reliability →
+      </Link>
 
       <div className="mt-lg grid gap-lg lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <div className="space-y-lg">
@@ -100,6 +110,7 @@ export default function ExperimentWorkspace() {
         <div className="space-y-lg">
           <MeasurementTable
             measurements={measurements.data ?? []}
+            previousById={previousById}
             loading={measurements.isLoading}
           />
           <div className="grid gap-lg md:grid-cols-2">

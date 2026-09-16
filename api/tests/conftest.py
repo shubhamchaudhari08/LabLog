@@ -165,9 +165,12 @@ PROTOCOL_STEPS = [
 ]
 
 
-@pytest.fixture
-def sb() -> FakeSupabase:
-    """A seeded fake database: STAB-104 RUNNING at step 1 with three samples."""
+def seeded_store() -> FakeSupabase:
+    """A seeded fake database: STAB-104 RUNNING at step 1 with three samples.
+
+    Plain function (not only a fixture) so eval/run.py can drive the real handlers
+    against the same state.
+    """
     store = FakeSupabase()
 
     store.tables["protocols"] = [
@@ -221,6 +224,11 @@ def sb() -> FakeSupabase:
     store.tables["deviations"] = []
     store.tables["events"] = []
     return store
+
+
+@pytest.fixture
+def sb() -> FakeSupabase:
+    return seeded_store()
 
 
 @pytest.fixture

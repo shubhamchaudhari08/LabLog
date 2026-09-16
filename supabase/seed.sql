@@ -7,14 +7,9 @@
 --      irreproducible on a fresh project. It is now resolved at run time from
 --      auth.users, so a public repository can be set up from scratch.
 --
--- Prerequisite: create the demo user in the Supabase dashboard (Auth → Users)
--- before running this file. Override the address with:
---   psql "$DATABASE_URL" -v demo_email="'you@example.com'" -f supabase/seed.sql
-
-\if :{?demo_email}
-\else
-  \set demo_email '''demo@lablog.dev'''
-\endif
+-- Prerequisite: create the demo user in Supabase (Auth -> Users) first. The
+-- seed assigns everything to the earliest-created user — the MVP has one.
+-- Runs as plain SQL, so it works from the Supabase SQL editor or psql alike.
 
 do $$
 declare
@@ -30,13 +25,14 @@ declare
   v_base     numeric;
   i          int;
 begin
-  select id into v_owner from auth.users where email = :demo_email limit 1;
+  select id into v_owner from auth.users order by created_at limit 1;
 
   if v_owner is null then
-    raise exception
-      'Demo user % not found. Create it in Supabase (Auth -> Users) before seeding.',
-      :demo_email;
+    raise exception 'No user found. Create the demo user in Supabase (Auth -> Users) before seeding.';
   end if;
+
+  -- Re-running the seed IS the demo reset: children cascade with their experiment.
+  delete from experiments where experiment_code in ('STAB-100', 'STAB-101', 'STAB-102', 'STAB-104');
 
   -- -------------------------------------------------------------------------
   -- Protocol: Sample Stability Evaluation v1 (fictional, safe)

@@ -11,7 +11,6 @@
 import { env } from './env';
 import { getAccessToken } from './supabase';
 import type { BootstrapResponse, ToolOutcome } from './voiceClient/types';
-import bootstrapFixture from './fixtures/voice-bootstrap.example.json';
 
 async function authHeaders(): Promise<Record<string, string>> {
   const token = await getAccessToken();
@@ -20,10 +19,6 @@ async function authHeaders(): Promise<Record<string, string>> {
 }
 
 export async function fetchBootstrap(experimentId: string): Promise<BootstrapResponse> {
-  // Stream E builds the entire voice loop against the committed fixture before
-  // routers/voice.py exists (contracts/voice-bootstrap.md §Parallel-work note).
-  if (env.useFixtures) return bootstrapFixture as unknown as BootstrapResponse;
-
   const response = await fetch(
     `${env.apiUrl}/voice/bootstrap?experiment_id=${encodeURIComponent(experimentId)}`,
     { headers: await authHeaders() },

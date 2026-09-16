@@ -1,7 +1,6 @@
 """The append-only audit trail.
 
-Constitution Principle II: every mutation appends an event row, in the same
-transaction as the change. The invariant "every data row has at least one
+Constitution Principle II: every mutation appends an event row. The invariant "every data row has at least one
 corresponding event row" is directly assertable, and holding it is the
 mechanical proof that no write path bypassed the dispatcher.
 """

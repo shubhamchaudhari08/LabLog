@@ -171,6 +171,8 @@ def record_measurement(
     if not unit:
         step = _step_at(sb, experiment, step_index) or {}
         unit = (step.get("default_unit") or {}).get(args.measurement_type)
+    if not unit and args.measurement_type.lower() == "ph":
+        unit = "pH"  # dimensionless; asking "what unit?" would be absurd on camera
     if not unit:
         return _err(
             "UNIT_REQUIRED",
@@ -550,15 +552,17 @@ def _completeness(sb, experiment) -> dict[str, Any]:
 
     missing: list[dict[str, Any]] = []
 
+    seen_fields: set[str] = set()
     for step in steps:
         required = [f for f in step.get("required_fields", []) if f != "sample_id"]
         for field in required:
-            recorded = {
-                m.get("sample_id")
-                for m in live
-                if m["measurement_type"] == field
-                and m.get("protocol_step_index") == step["index"]
-            }
+            # ponytail: per-experiment, as data-model.md specifies — one reading per
+            # sample satisfies every step requiring that type. Scope by
+            # protocol_step_index if repeat readings must be enforced.
+            if field in seen_fields:
+                continue
+            seen_fields.add(field)
+            recorded = {m.get("sample_id") for m in live if m["measurement_type"] == field}
             absent = sorted(code for sid, code in by_id.items() if sid not in recorded)
             if absent:
                 missing.append(

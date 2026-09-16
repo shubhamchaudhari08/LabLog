@@ -16,7 +16,7 @@
  * visible — the thing that separates this from a spreadsheet.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MeasurementRow } from '@/lib/queries/useExperiment';
 import { OPTIMISTIC_TIMEOUT_MS } from '@/lib/queries/useExperiment';
 
@@ -40,20 +40,11 @@ function UnconfirmedMark({ since }: { since: string }) {
   return <span className="text-warning">unconfirmed</span>;
 }
 
-function Row({ measurement }: { measurement: MeasurementRow }) {
-  const isNew = useRef(true);
-  useEffect(() => {
-    isNew.current = false;
-  }, []);
-
+function Row({ measurement, previous }: { measurement: MeasurementRow; previous?: number }) {
   const corrected = Boolean(measurement.correction_reason);
 
   return (
-    <tr
-      className={`border-b border-hairline-soft last:border-0 ${
-        isNew.current ? 'animate-cell-land' : ''
-      }`}
-    >
+    <tr className="animate-cell-land border-b border-hairline-soft last:border-0">
       <td className="py-sm pl-lg pr-md">
         <span className="text-title-sm text-ink">
           {measurement.samples?.sample_code ?? '—'}
@@ -74,9 +65,10 @@ function Row({ measurement }: { measurement: MeasurementRow }) {
         )}
       </td>
       <td className="py-sm pl-md pr-lg">
+        {/* The audit trail made visible: the old value stays on screen. */}
         {corrected && (
-          <span className="badge" title={measurement.correction_reason ?? ''}>
-            corrected
+          <span className="badge tabular" title={measurement.correction_reason ?? ''}>
+            {previous === undefined ? 'corrected' : `previous ${previous}`}
           </span>
         )}
       </td>
@@ -86,9 +78,12 @@ function Row({ measurement }: { measurement: MeasurementRow }) {
 
 export function MeasurementTable({
   measurements,
+  previousById = {},
   loading,
 }: {
   measurements: MeasurementRow[];
+  /** measurement id -> value it superseded, from MEASUREMENT_CORRECTED events. */
+  previousById?: Record<string, number>;
   loading?: boolean;
 }) {
   return (
@@ -123,7 +118,11 @@ export function MeasurementTable({
           </thead>
           <tbody>
             {measurements.map((measurement) => (
-              <Row key={measurement.id} measurement={measurement} />
+              <Row
+                key={measurement.id}
+                measurement={measurement}
+                previous={measurement.previous_value ?? previousById[measurement.id]}
+              />
             ))}
           </tbody>
         </table>

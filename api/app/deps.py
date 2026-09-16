@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import jwt
@@ -24,7 +25,6 @@ class User:
     """The authenticated caller. `id` is the Supabase `auth.users.id`."""
 
     id: str
-    email: str | None = None
 
 
 def _require_env(name: str) -> str:
@@ -60,12 +60,21 @@ def supabase_admin() -> Any:
     return _admin_client
 
 
+@lru_cache
+def _jwks() -> jwt.PyJWKClient:
+    # PyJWKClient caches fetched keys itself; this caches the client.
+    return jwt.PyJWKClient(f"{_require_env('SUPABASE_URL')}/auth/v1/.well-known/jwks.json")
+
+
 async def get_current_user(authorization: str | None = Header(default=None)) -> User:
     """Verify the caller's Supabase access token and return the user.
 
-    Verification is local (HS256 against the project's JWT secret) rather than a
-    network call to Supabase, because this sits inside a spoken turn and a
-    round trip per tool call would be audible as hesitation.
+    Verification is local rather than a network call to Supabase, because this
+    sits inside a spoken turn and a round trip per tool call would be audible.
+
+    Projects created after May 2025 sign with asymmetric keys (ES256/RS256)
+    published at the JWKS endpoint; older projects use the legacy HS256 secret.
+    Both are accepted, each only with its own key type.
     """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="UNAUTHENTICATED")
@@ -75,12 +84,18 @@ async def get_current_user(authorization: str | None = Header(default=None)) -> 
         raise HTTPException(status_code=401, detail="UNAUTHENTICATED")
 
     try:
-        payload = jwt.decode(
-            token,
-            _require_env("SUPABASE_JWT_SECRET"),
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
+        alg = jwt.get_unverified_header(token).get("alg")
+        if alg == "HS256":
+            key = os.environ.get("SUPABASE_JWT_SECRET")
+            if not key:
+                raise jwt.InvalidTokenError("legacy secret not configured")
+        elif alg in ("ES256", "RS256"):
+            key = _jwks().get_signing_key_from_jwt(token).key
+        else:
+            # Rejects "none" and anything unexpected before a key is chosen,
+            # so a token cannot pick its own verification algorithm.
+            raise jwt.InvalidAlgorithmError(alg)
+        payload = jwt.decode(token, key, algorithms=[alg], audience="authenticated")
     except jwt.PyJWTError:
         # Deliberately opaque: expired, wrong audience, bad signature and
         # malformed all collapse to one message. Distinguishing them tells an
@@ -91,4 +106,4 @@ async def get_current_user(authorization: str | None = Header(default=None)) -> 
     if not subject:
         raise HTTPException(status_code=401, detail="INVALID_TOKEN")
 
-    return User(id=subject, email=payload.get("email"))
+    return User(id=subject)

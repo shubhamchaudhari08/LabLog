@@ -122,6 +122,11 @@ def test_unknown_sample_rejected_with_valid_codes(sb, experiment):
     assert sb.count("events") == 0
 
 
+def test_ph_needs_no_unit(sb, experiment):
+    result = record(sb, experiment, measurement_type="pH", value=7.4, unit=None)
+    assert result["success"] is True and result["data"]["unit"] == "pH"
+
+
 def test_missing_unit_with_no_protocol_default_is_rejected(sb, experiment):
     result = record(sb, experiment, measurement_type="mass", unit=None)
     assert result["success"] is False

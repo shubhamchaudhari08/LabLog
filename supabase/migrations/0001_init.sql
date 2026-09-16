@@ -203,3 +203,11 @@ create index observations_recent_idx on observations  (experiment_id, recorded_a
 create index deviations_recent_idx   on deviations    (experiment_id, created_at desc);
 create index events_recent_idx       on events        (experiment_id, created_at desc);
 create index samples_by_experiment   on samples       (experiment_id, sample_code);
+
+-- ---------------------------------------------------------------------------
+-- Realtime. Supabase only streams tables in this publication. Without it the
+-- canonical update path is silent, and every spoken value sits "unconfirmed"
+-- in the workspace (contracts/db-read.md).
+-- ---------------------------------------------------------------------------
+alter publication supabase_realtime
+  add table measurements, observations, deviations, events, experiments;

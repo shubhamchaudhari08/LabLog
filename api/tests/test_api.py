@@ -7,7 +7,6 @@ own, and that privileged credentials never leave this service.
 
 from __future__ import annotations
 
-import os
 import time
 
 import jwt
@@ -15,7 +14,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.deps import get_current_user, supabase_admin
 from app.routers import tools as tools_router
 from app.routers import voice as voice_router
 from tests.conftest import EXPERIMENT_ID, OTHER_USER_ID, OWNER_ID, FakeSupabase
@@ -46,10 +44,7 @@ def client(sb: FakeSupabase, monkeypatch):
     app = FastAPI()
     app.include_router(tools_router.router)
     app.include_router(voice_router.router)
-    app.dependency_overrides[supabase_admin] = lambda: sb
-
-    # The routers call supabase_admin() directly rather than via Depends, so the
-    # override above is not enough — patch the module-level name too.
+    # The routers call supabase_admin() directly, so patch the module-level name.
     monkeypatch.setattr(tools_router, "supabase_admin", lambda: sb)
     monkeypatch.setattr(voice_router, "supabase_admin", lambda: sb)
 
@@ -262,3 +257,37 @@ def test_bootstrap_leaks_no_privileged_credential(client, sb, fake_token):
     ).text
     for secret in ("super-secret-key", JWT_SECRET, "SERVICE_ROLE"):
         assert secret not in raw, f"{secret!r} appeared in the bootstrap response"
+
+
+# ---------------------------------------------------------------------------
+# Asymmetric signing keys — the default for Supabase projects since May 2025.
+# ---------------------------------------------------------------------------
+def test_es256_token_verified_via_jwks(client, sb, monkeypatch):
+    from types import SimpleNamespace
+
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    from app import deps
+
+    private = ec.generate_private_key(ec.SECP256R1())
+    fake_jwks = SimpleNamespace(get_signing_key_from_jwt=lambda _t: SimpleNamespace(key=private.public_key()))
+    monkeypatch.setattr(deps, "_jwks", lambda: fake_jwks)
+
+    now = int(time.time())
+    token = jwt.encode(
+        {"sub": OWNER_ID, "aud": "authenticated", "exp": now + 3600}, private, algorithm="ES256"
+    )
+    assert post_tool(client, token).status_code == 200
+    assert sb.count("measurements") == 1
+
+    # Signed by a different key: rejected, nothing written.
+    other = ec.generate_private_key(ec.SECP256R1())
+    forged = jwt.encode({"sub": OWNER_ID, "aud": "authenticated", "exp": now + 3600}, other, algorithm="ES256")
+    assert post_tool(client, forged).status_code == 401
+    assert sb.count("measurements") == 1
+
+
+def test_unsigned_token_is_rejected(client, sb):
+    token = jwt.encode({"sub": OWNER_ID, "aud": "authenticated"}, None, algorithm="none")
+    assert post_tool(client, token).status_code == 401
+    assert sb.count("measurements") == 0

@@ -64,6 +64,11 @@ export function useVoiceAgent({
   const bufferRef = useRef<TurnBuffer | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const deliberateCloseRef = useRef(false);
+  /** Audio may only flow after session.ready (contracts/aai-websocket.md §3). */
+  const readyRef = useRef(false);
+  const configRef = useRef<Record<string, unknown> | null>(null);
+  const retriesRef = useRef(0);
+  const connectRef = useRef<() => Promise<void>>(async () => {});
 
   const send = useCallback((message: unknown) => {
     const socket = socketRef.current;
@@ -115,6 +120,8 @@ export function useVoiceAgent({
     (message: ServerMessage) => {
       switch (message.type) {
         case 'session.ready':
+          readyRef.current = true;
+          retriesRef.current = 0;
           sessionIdRef.current = message.session_id;
           setSessionId(message.session_id);
           setStatus('listening');
@@ -167,6 +174,17 @@ export function useVoiceAgent({
 
         case 'session.error':
         case 'error':
+          if (
+            (message.code === 'session_not_found' || message.code === 'session_expired') &&
+            configRef.current
+          ) {
+            // Resume failed: start a fresh session and say so, rather than
+            // pretend the conversation survived.
+            sessionIdRef.current = null;
+            send({ type: 'session.update', session: configRef.current });
+            setError('The previous conversation could not be resumed; started a new one.');
+            break;
+          }
           setError(`${message.code}: ${message.message}`);
           setStatus('error');
           break;
@@ -179,7 +197,7 @@ export function useVoiceAgent({
           break;
       }
     },
-    [appendTurn, dispatchTool],
+    [appendTurn, dispatchTool, send],
   );
 
   // -------------------------------------------------------------------------
@@ -192,7 +210,9 @@ export function useVoiceAgent({
 
     try {
       const bootstrap = await fetchBootstrap(experimentId);
+      configRef.current = bootstrap.session_config;
 
+      void playerRef.current?.close();
       const player = new AgentAudioPlayer();
       await player.resume();
       playerRef.current = player;
@@ -203,13 +223,15 @@ export function useVoiceAgent({
 
       socket.onopen = () => {
         const resumeId = sessionIdRef.current;
-        if (resumeId) {
-          // Reconnect: try to keep the conversation rather than restart it.
-          socket.send(JSON.stringify({ type: 'session.resume', session_id: resumeId }));
-        }
-        // session_config is opaque — passed through exactly as the backend
-        // authored it.
-        socket.send(JSON.stringify({ type: 'session.update', session: bootstrap.session_config }));
+        // Reconnect keeps the conversation; a fresh start sends the config,
+        // which is opaque — passed through exactly as the backend authored it.
+        socket.send(
+          JSON.stringify(
+            resumeId
+              ? { type: 'session.resume', session_id: resumeId }
+              : { type: 'session.update', session: bootstrap.session_config },
+          ),
+        );
       };
 
       socket.onmessage = (event) => {
@@ -228,25 +250,41 @@ export function useVoiceAgent({
       };
 
       socket.onclose = () => {
+        readyRef.current = false;
+        void micRef.current?.stop();
+        micRef.current = null;
+        playerRef.current?.flush();
         if (deliberateCloseRef.current) {
           setStatus('idle');
           return;
         }
-        // Destructive actions are disabled while degraded, and nothing claims a
-        // save that may not have completed.
+        if (retriesRef.current >= 3) {
+          setError('Connection lost. Press Start session to try again.');
+          setStatus('error');
+          retriesRef.current = 0;
+          return;
+        }
+        // Nothing is recorded while degraded, and nothing claims a save that may
+        // not have completed. A fresh token is minted — the old one is spent.
+        retriesRef.current += 1;
         setStatus('reconnecting');
+        setTimeout(() => void connectRef.current(), 1000 * retriesRef.current);
       };
 
       micRef.current = await startMicCapture((base64Pcm) => {
-        send({ type: 'input.audio', audio: base64Pcm });
+        if (readyRef.current) send({ type: 'input.audio', audio: base64Pcm });
       });
 
-      setStatus('ready');
+      // session.ready may already have moved us to "listening".
+      setStatus((current) => (current === 'connecting' ? 'ready' : current));
     } catch (cause) {
+      deliberateCloseRef.current = true;
+      socketRef.current?.close();
       setError(cause instanceof Error ? cause.message : 'Could not start the voice session.');
       setStatus('error');
     }
   }, [experimentId, handleMessage, send]);
+  connectRef.current = connect;
 
   const disconnect = useCallback(() => {
     deliberateCloseRef.current = true;

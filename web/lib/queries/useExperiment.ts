@@ -32,6 +32,8 @@ export interface MeasurementRow {
   samples?: { sample_code: string } | null;
   /** Client-only: awaiting confirmation from the change stream. */
   _optimistic?: boolean;
+  /** Client-only: the superseded value, known from the tool result before events refetch. */
+  previous_value?: number;
 }
 
 export const keys = {
@@ -188,6 +190,7 @@ export function applyOptimisticToolResult(
           recorded_at: new Date().toISOString(),
           samples: { sample_code: sampleCode },
           _optimistic: true,
+          previous_value: Number(data.previous_value),
         },
         ...without,
       ];
