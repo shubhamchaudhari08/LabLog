@@ -18,9 +18,19 @@ Design: [`specs/001-lablog-voice-notebook/`](specs/001-lablog-voice-notebook/pla
 ## Run it
 
 **1. Supabase.** Create a project and run `supabase/migrations/0001_init.sql`.
-Create one user under Auth → Users, then run `supabase/seed.sql`. Re-running the
-seed resets the demo. Add `http://localhost:3000/dashboard` to Auth → URL
-Configuration → Redirect URLs.
+
+Create the demo user under Auth → Users → Add user, with an email **and a
+password**, and tick "Auto Confirm User". Then run `supabase/seed.sql`, which
+assigns the seeded experiment to that user. Re-running the seed resets the demo.
+
+Put those same credentials in `web/.env.local` as `NEXT_PUBLIC_DEMO_EMAIL` and
+`NEXT_PUBLIC_DEMO_PASSWORD`. The app then signs itself in, so reviewers land
+straight on the workspace with no login. This is guest mode, not an auth bypass:
+a real session is created, so every request still carries a genuine JWT and the
+backend's ownership check still runs. Leave both blank to require a real login.
+
+The magic-link form stays at `/login` for real accounts. To use it, add
+`http://localhost:3000/dashboard` to Auth → URL Configuration → Redirect URLs.
 
 **2. API.**
 ```bash

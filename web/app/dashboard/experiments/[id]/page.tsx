@@ -82,9 +82,14 @@ export default function ExperimentWorkspace() {
         protocolName={protocol?.name}
         protocolVersion={protocol?.version}
       />
-      <Link href="/reliability" className="mt-xs inline-block text-caption text-primary hover:text-primary-active">
-        Reliability →
-      </Link>
+      <div className="mt-xs flex gap-md text-caption">
+        <Link href="/reliability" className="text-primary hover:text-primary-active">
+          Reliability →
+        </Link>
+        <Link href="/login" className="text-muted-soft hover:text-muted">
+          Sign in
+        </Link>
+      </div>
 
       <div className="mt-lg grid gap-lg lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
         <div className="space-y-lg">

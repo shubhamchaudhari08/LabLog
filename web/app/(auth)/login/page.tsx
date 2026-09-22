@@ -5,6 +5,7 @@
  * still has a real owner — which is what makes the ownership check meaningful.
  */
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { env } from '@/lib/env';
@@ -60,6 +61,16 @@ export default function LoginPage() {
           </button>
           {error && <p className="text-caption text-error">{error}</p>}
         </form>
+      )}
+
+      {/* Guest mode is the default route; this form exists for real accounts. */}
+      {!sent && (
+        <Link
+          href="/dashboard"
+          className="mt-lg inline-block text-caption text-muted hover:text-ink"
+        >
+          ← Continue with the demo experiment
+        </Link>
       )}
     </main>
   );

@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { ensureSession, supabase } from '@/lib/supabase';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -15,8 +15,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     void (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!data.session) return router.replace('/login');
+      // Guest mode signs in as the demo account; only a project without demo
+      // credentials configured sends the visitor to the login form.
+      if (!(await ensureSession())) return router.replace('/login');
 
       const { data: running } = await supabase
         .from('experiments')
