@@ -19,15 +19,18 @@ export default function Dashboard() {
       // credentials configured sends the visitor to the login form.
       if (!(await ensureSession())) return router.replace('/login');
 
-      const { data: running } = await supabase
+      // RUNNING first, then anything still open: an experiment whose protocol is
+      // about to be dictated is DRAFT until the first step lands, and it has to
+      // be reachable before that.
+      const { data: open } = await supabase
         .from('experiments')
-        .select('id')
-        .eq('status', 'RUNNING')
-        .order('started_at', { ascending: false })
-        .limit(1);
+        .select('id, status')
+        .in('status', ['RUNNING', 'PAUSED', 'READY', 'DRAFT'])
+        .order('created_at', { ascending: false });
 
-      if (running?.[0]) router.replace(`/dashboard/experiments/${running[0].id}`);
-      else setMessage('No running experiment. Run supabase/seed.sql to reset the demo.');
+      const target = open?.find((e) => e.status === 'RUNNING') ?? open?.[0];
+      if (target) router.replace(`/dashboard/experiments/${target.id}`);
+      else setMessage('No open experiment. Run supabase/seed.sql to reset the demo.');
     })();
   }, [router]);
 

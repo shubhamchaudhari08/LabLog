@@ -36,6 +36,13 @@ export interface MeasurementRow {
   previous_value?: number;
 }
 
+export interface ProtocolStep {
+  index: number;
+  id: string;
+  name: string;
+  required_fields?: string[];
+}
+
 export const keys = {
   experiment: (id: string) => ['experiment', id] as const,
   samples: (id: string) => ['samples', id] as const,
@@ -203,6 +210,9 @@ export function applyOptimisticToolResult(
     record_observation: keys.observations(experimentId),
     create_deviation: keys.deviations(experimentId),
     complete_protocol_step: keys.experiment(experimentId),
+    // Steps live on `protocols`, which has no subscription - the experiment
+    // query's join is what brings the change in, so it must be invalidated.
+    write_protocol_step: keys.experiment(experimentId),
     complete_experiment: keys.experiment(experimentId),
   };
   const key = affected[tool];
