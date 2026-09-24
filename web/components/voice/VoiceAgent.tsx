@@ -5,8 +5,12 @@
  *
  * DESIGN.md reserves the dark navy surface for product chrome — code editors,
  * terminal panels, the places the product shows itself working. The live
- * transcript is this application's equivalent, and the cream-to-dark contrast
- * makes the conversation read as the instrument rather than as decoration.
+ * transcript is this application's equivalent.
+ *
+ * One dark block dropped into a cream page normally reads as an accident. What
+ * makes it read as intentional here: it is the tallest element in its column,
+ * it carries a lit top edge under the same light as the cream panels, and its
+ * own internal surfaces step darker rather than sitting flat.
  */
 
 import { useEffect, useRef } from 'react';
@@ -34,12 +38,20 @@ const STATUS_DOT: Record<VoiceStatusValue, string> = {
   error: 'bg-error',
 };
 
-export function VoiceStatus({ status, sessionId }: { status: VoiceStatusValue; sessionId: string | null }) {
+export function VoiceStatus({
+  status,
+  sessionId,
+}: {
+  status: VoiceStatusValue;
+  sessionId: string | null;
+}) {
   return (
-    <div className="flex items-center justify-between px-lg py-md">
+    <div className="flex items-center justify-between gap-md border-b border-white/[0.07] px-lg py-md">
       <div className="flex items-center gap-xs">
         <span aria-hidden className={`h-2 w-2 rounded-pill ${STATUS_DOT[status]}`} />
-        <span className="text-title-sm text-on-dark">{STATUS_COPY[status]}</span>
+        <span className="text-title-sm text-on-dark" role="status" aria-live="polite">
+          {STATUS_COPY[status]}
+        </span>
       </div>
       {sessionId && (
         <span className="font-mono text-[11px] text-on-dark-soft" title="Voice session id">
@@ -50,13 +62,7 @@ export function VoiceStatus({ status, sessionId }: { status: VoiceStatusValue; s
   );
 }
 
-export function TranscriptPanel({
-  turns,
-  partial,
-}: {
-  turns: TranscriptTurn[];
-  partial: string;
-}) {
+export function TranscriptPanel({ turns, partial }: { turns: TranscriptTurn[]; partial: string }) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -64,32 +70,42 @@ export function TranscriptPanel({
   }, [turns.length, partial]);
 
   return (
-    <div className="max-h-[260px] min-h-[160px] space-y-sm overflow-y-auto px-lg pb-md">
+    <div className="max-h-[300px] min-h-[200px] space-y-md overflow-y-auto px-lg py-md">
       {turns.length === 0 && !partial && (
-        <p className="text-body-sm text-on-dark-soft">
-          Start the session and speak. Try “A17 is 4.2 Celsius.”
-        </p>
+        <div className="pt-md">
+          <p className="text-body-sm text-on-dark-soft">
+            The transcript appears here as you speak.
+          </p>
+          <ul className="mt-md space-y-xs font-mono text-[13px] text-on-dark-soft/80">
+            <li>“A17 is 4.2 Celsius”</li>
+            <li>“Note A18 looks slightly cloudy”</li>
+            <li>“What&rsquo;s next?”</li>
+          </ul>
+        </div>
       )}
 
       {turns.map((turn) => (
-        <p
-          key={turn.id}
-          className={
-            turn.role === 'user'
-              ? 'text-body-sm text-on-dark'
-              : 'text-body-sm text-accent-teal'
-          }
-        >
-          <span className="mr-xs text-caption-upper uppercase text-on-dark-soft">
+        <div key={turn.id} className="animate-rise">
+          <p className="text-caption-upper uppercase text-on-dark-soft/70">
             {turn.role === 'user' ? 'you' : 'lablog'}
-          </span>
-          {turn.text}
-        </p>
+          </p>
+          <p
+            className={`mt-xxs text-body-sm ${
+              turn.role === 'user' ? 'text-on-dark' : 'text-accent-teal'
+            }`}
+          >
+            {turn.text}
+          </p>
+        </div>
       ))}
 
       {/* Provisional text sits visibly below the committed turns, so the user
           can see recognition happening without mistaking it for a record. */}
-      {partial && <p className="text-body-sm italic text-on-dark-soft">{partial}</p>}
+      {partial && (
+        <p className="border-l-2 border-white/10 pl-sm text-body-sm italic text-on-dark-soft">
+          {partial}
+        </p>
+      )}
 
       <div ref={endRef} />
     </div>
@@ -123,51 +139,45 @@ export function VoiceAgent({
   const degraded = status === 'reconnecting';
 
   return (
-    <section className="panel-dark flex flex-col overflow-hidden">
+    <section className="panel-dark flex flex-col overflow-hidden" aria-label="Voice session">
       <VoiceStatus status={status} sessionId={sessionId} />
 
       {degraded && (
-        <p className="mx-lg mb-sm rounded-md bg-accent-amber/15 px-sm py-xs text-caption text-accent-amber">
-          Connection lost. Recording is paused — nothing is being saved until this reconnects.
+        <p className="mx-lg mt-md rounded-md border border-accent-amber/25 bg-accent-amber/10 px-sm py-xs text-caption text-accent-amber">
+          Connection lost. Nothing is being recorded until this reconnects.
         </p>
       )}
 
       {error && (
-        <p className="mx-lg mb-sm rounded-md bg-error/15 px-sm py-xs text-caption text-error">
+        <p className="mx-lg mt-md rounded-md border border-error/25 bg-error/10 px-sm py-xs text-caption text-error">
           {error}
         </p>
       )}
 
       <TranscriptPanel turns={turns} partial={partial} />
 
-      <footer className="mt-auto flex items-center gap-xs border-t border-white/5 px-lg py-md">
+      <footer className="mt-auto flex items-center gap-xs border-t border-white/[0.07] bg-surface-dark-soft px-lg py-md">
         {!live ? (
           <button type="button" className="btn-primary" onClick={onConnect}>
             Start session
           </button>
         ) : (
           <>
-            <button
-              type="button"
-              className="inline-flex h-10 items-center rounded-md bg-surface-dark-elevated px-lg text-[14px] font-medium text-on-dark transition-colors hover:bg-white/10"
-              onClick={onToggleMute}
-              // Destructive and record-producing controls are disabled while a
-              // tool round trip is outstanding or the socket is degraded.
-              disabled={degraded}
-            >
+            <button type="button" className="btn-dark" onClick={onToggleMute} disabled={degraded}>
               {muted ? 'Unmute' : 'Mute'}
             </button>
-            <button
-              type="button"
-              className="inline-flex h-10 items-center rounded-md px-lg text-[14px] font-medium text-on-dark-soft transition-colors hover:text-on-dark"
-              onClick={onDisconnect}
-            >
+            <button type="button" className="btn-quiet" onClick={onDisconnect}>
               End session
             </button>
           </>
         )}
 
-        {busy && <span className="ml-auto text-caption text-on-dark-soft">saving…</span>}
+        {busy && (
+          <span className="ml-auto flex items-center gap-xs text-caption text-on-dark-soft">
+            <span aria-hidden className="h-1.5 w-1.5 animate-pulse-soft rounded-pill bg-primary" />
+            saving
+          </span>
+        )}
       </footer>
     </section>
   );

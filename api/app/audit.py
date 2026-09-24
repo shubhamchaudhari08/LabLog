@@ -30,7 +30,8 @@ def write_event(
     actor_id: str | None = None,
     voice_session_id: str | None = None,
 ) -> dict[str, Any]:
-    """Append one event. Never updates, never deletes.
+    """
+    Append one event. Never updates, never deletes.
 
     `voice_session_id` is what makes the trail interesting rather than merely
     present: combined with a measurement's `raw_spoken_value` it reconstructs

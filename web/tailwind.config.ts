@@ -54,9 +54,11 @@ const config: Config = {
       },
 
       fontFamily: {
-        display: ['Copernicus', 'Tiempos Headline', 'Garamond', 'Times New Roman', 'serif'],
-        sans: ['StyreneB', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
-        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        // Loaded by next/font in app/layout.tsx. Naming a family Tailwind never
+        // loads is how the whole interface ended up rendering in Times.
+        display: ['var(--font-display)', 'Tiempos Headline', 'Garamond', 'serif'],
+        sans: ['var(--font-sans)', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
 
       fontSize: {
@@ -72,6 +74,14 @@ const config: Config = {
         caption: ['13px', { lineHeight: '1.4', fontWeight: '500' }],
         'caption-upper': ['12px', { lineHeight: '1.4', letterSpacing: '1.5px', fontWeight: '500' }],
         code: ['14px', { lineHeight: '1.6', fontWeight: '400' }],
+      },
+
+      // Warm, tinted shadows — black at low opacity turns cream grey and muddy.
+      boxShadow: {
+        panel: '0 1px 2px rgba(20,20,19,0.04), 0 10px 28px -18px rgba(20,20,19,0.18)',
+        lift: '0 2px 4px rgba(20,20,19,0.05), 0 18px 40px -22px rgba(20,20,19,0.28)',
+        dark: '0 2px 6px rgba(0,0,0,0.30), 0 28px 60px -28px rgba(0,0,0,0.55)',
+        inset: 'inset 0 1px 0 rgba(255,255,255,0.06)',
       },
 
       borderRadius: {
@@ -106,10 +116,20 @@ const config: Config = {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.45' },
         },
+        // Staggered entry: rows cascade rather than all appearing at once.
+        rise: {
+          from: { opacity: '0', transform: 'translateY(6px)' },
+          to: { opacity: '1', transform: 'none' },
+        },
+        shimmer: {
+          '100%': { transform: 'translateX(100%)' },
+        },
       },
       animation: {
         'cell-land': 'cell-land 1.2s ease-out forwards',
         'pulse-soft': 'pulse-soft 1.6s ease-in-out infinite',
+        rise: 'rise 420ms cubic-bezier(0.16, 1, 0.3, 1) both',
+        shimmer: 'shimmer 1.6s infinite',
       },
     },
   },

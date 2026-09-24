@@ -3,16 +3,17 @@
 /**
  * The Experiment Workspace — the only screen in the MVP.
  *
- * Layout follows plan.md: voice on the left (dark product chrome), protocol on
- * the right, measurements below, supporting panels beneath. The measurement
- * table sits where the eye lands because that is the hero.
+ * Layout: voice on the left as a sticky column (it is the input device, so it
+ * should never scroll away mid-sentence), records on the right where the eye
+ * lands. The measurement table sits at the top of that column because it is the
+ * hero — the thing the demo is selling.
  */
 
 import { useCallback } from 'react';
-import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 
+import { SessionPill, TopNav } from '@/components/Chrome';
 import { VoiceAgent } from '@/components/voice/VoiceAgent';
 import { useVoiceAgent } from '@/components/voice/useVoiceAgent';
 import { MeasurementTable } from '@/components/experiment/MeasurementTable';
@@ -35,6 +36,8 @@ import {
   useRealtimeExperiment,
   useSamples,
 } from '@/lib/queries/useExperiment';
+
+const LIVE_STATES = new Set(['listening', 'thinking', 'speaking', 'ready']);
 
 export default function ExperimentWorkspace() {
   const params = useParams<{ id: string }>();
@@ -74,57 +77,67 @@ export default function ExperimentWorkspace() {
   const steps = protocol?.steps ?? [];
 
   return (
-    <main className="mx-auto max-w-[1180px] px-lg py-xl">
-      <ExperimentHeader
-        code={experiment.data?.experiment_code ?? '—'}
-        name={experiment.data?.name ?? 'Loading…'}
-        status={experiment.data?.status ?? 'DRAFT'}
-        protocolName={protocol?.name}
-        protocolVersion={protocol?.version}
+    <>
+      <TopNav
+        status={
+          <SessionPill
+            label={LIVE_STATES.has(voice.status) ? 'Session live' : 'Session idle'}
+            tone={
+              LIVE_STATES.has(voice.status)
+                ? 'live'
+                : voice.status === 'reconnecting'
+                  ? 'warn'
+                  : 'idle'
+            }
+          />
+        }
       />
-      <div className="mt-xs flex gap-md text-caption">
-        <Link href="/reliability" className="text-primary hover:text-primary-active">
-          Reliability →
-        </Link>
-        <Link href="/login" className="text-muted-soft hover:text-muted">
-          Sign in
-        </Link>
-      </div>
 
-      <div className="mt-lg grid gap-lg lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-        <div className="space-y-lg">
-          <VoiceAgent
-            status={voice.status}
-            turns={voice.turns}
-            partial={voice.partial}
-            sessionId={voice.sessionId}
-            error={voice.error}
-            busy={voice.busy}
-            muted={voice.muted}
-            onConnect={() => void voice.connect()}
-            onDisconnect={voice.disconnect}
-            onToggleMute={voice.toggleMute}
-          />
-          <SamplePanel samples={samples.data ?? []} />
-          <ProtocolProgress
-            steps={steps}
-            currentIndex={experiment.data?.current_step_index ?? 0}
-          />
-        </div>
+      <main id="main" className="mx-auto max-w-[1240px] px-lg pb-section pt-xl">
+        <ExperimentHeader
+          code={experiment.data?.experiment_code ?? '—'}
+          name={experiment.data?.name ?? 'Loading…'}
+          status={experiment.data?.status ?? 'DRAFT'}
+          protocolName={protocol?.name}
+          protocolVersion={protocol?.version}
+        />
 
-        <div className="space-y-lg">
-          <MeasurementTable
-            measurements={measurements.data ?? []}
-            previousById={previousById}
-            loading={measurements.isLoading}
-          />
-          <div className="grid gap-lg md:grid-cols-2">
-            <ObservationPanel observations={observations.data ?? []} />
-            <DeviationPanel deviations={deviations.data ?? []} />
+        <div className="mt-xl grid gap-lg lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:gap-xl">
+          {/* The input device stays put while the record scrolls. */}
+          <div className="space-y-lg lg:sticky lg:top-[88px] lg:self-start">
+            <VoiceAgent
+              status={voice.status}
+              turns={voice.turns}
+              partial={voice.partial}
+              sessionId={voice.sessionId}
+              error={voice.error}
+              busy={voice.busy}
+              muted={voice.muted}
+              onConnect={() => void voice.connect()}
+              onDisconnect={voice.disconnect}
+              onToggleMute={voice.toggleMute}
+            />
+            <SamplePanel samples={samples.data ?? []} />
+            <ProtocolProgress
+              steps={steps}
+              currentIndex={experiment.data?.current_step_index ?? 0}
+            />
           </div>
-          <ExperimentTimeline events={events.data ?? []} />
+
+          <div className="space-y-lg">
+            <MeasurementTable
+              measurements={measurements.data ?? []}
+              previousById={previousById}
+              loading={measurements.isLoading}
+            />
+            <div className="grid gap-lg md:grid-cols-2">
+              <ObservationPanel observations={observations.data ?? []} />
+              <DeviationPanel deviations={deviations.data ?? []} />
+            </div>
+            <ExperimentTimeline events={events.data ?? []} />
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </>
   );
 }

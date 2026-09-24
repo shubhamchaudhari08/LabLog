@@ -32,8 +32,8 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[420px] flex-col justify-center px-lg">
-      <h1 className="text-display-md">LabLog</h1>
+    <main id="main" className="mx-auto flex min-h-dvh max-w-[420px] flex-col justify-center px-lg">
+      <h1 className="text-display-lg">LabLog</h1>
       <p className="mt-xs text-body-md text-muted">
         Voice-native laboratory notebook.
       </p>
@@ -53,7 +53,7 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="h-10 w-full rounded-md border border-hairline bg-canvas px-sm text-body-md text-ink outline-none focus:border-primary"
+            className="h-10 w-full rounded-md border border-hairline bg-canvas px-sm text-body-md text-ink transition-colors hover:border-muted-soft focus:border-primary"
             placeholder="you@lab.org"
           />
           <button type="submit" className="btn-primary w-full justify-center" disabled={busy}>

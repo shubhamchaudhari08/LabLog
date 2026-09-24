@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { TopNav } from '@/components/Chrome';
 
 interface Metric {
   value: number | null;
@@ -37,25 +38,47 @@ export default function Reliability() {
       .catch(() => setData('missing'));
   }, []);
 
-  if (data === null) return <main className="px-lg py-section text-muted">Loading…</main>;
+  if (data === null)
+    return (
+      <>
+        <TopNav />
+        <main id="main" className="mx-auto max-w-[880px] px-lg py-xl">
+          <div className="skeleton h-9 w-64" />
+          <div className="panel mt-lg divide-y divide-hairline-soft">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="px-lg py-sm">
+                <div className="skeleton h-4 w-48" />
+              </div>
+            ))}
+          </div>
+        </main>
+      </>
+    );
 
   if (data === 'missing')
     return (
-      <main className="mx-auto max-w-[720px] px-lg py-section">
-        <h1 className="text-display-sm">Reliability</h1>
+      <>
+        <TopNav />
+        <main id="main" className="mx-auto max-w-[720px] px-lg py-section">
+          <h1 className="text-display-md">Reliability</h1>
         {/* Never a placeholder figure that could be mistaken for a measurement. */}
-        <p className="mt-md text-body-md text-muted">
-          No evaluation has been run yet. Run{' '}
-          <code className="font-mono text-code text-ink">python -m eval.run</code> in{' '}
-          <code className="font-mono text-code text-ink">api/</code>.
-        </p>
-      </main>
+          <p className="mt-sm max-w-[52ch] text-body-md text-muted">
+            No evaluation has been run yet, so there are no numbers to show. Running the harness
+            writes them here.
+          </p>
+          <p className="mt-md inline-block rounded-md border border-hairline bg-surface-soft px-sm py-xs font-mono text-body-sm text-body">
+            cd api && python -m eval.run
+          </p>
+        </main>
+      </>
     );
 
   return (
-    <main className="mx-auto max-w-[880px] px-lg py-xl">
+    <>
+      <TopNav />
+      <main id="main" className="mx-auto max-w-[880px] px-lg pb-section pt-xl">
       <h1 className="text-display-md">Reliability</h1>
-      <p className="mt-xs text-body-sm text-muted">
+      <p className="mt-xs font-mono text-caption text-muted">
         {data.scenario_count} scenarios · {data.model} · {new Date(data.generated_at).toLocaleString()} ·
         commit {data.git_sha}
       </p>
@@ -69,8 +92,13 @@ export default function Reliability() {
                 <p className="text-body-sm capitalize text-ink">{name.replaceAll('_', ' ')}</p>
                 {/* Rates where lower is better are not drawn as bars beside accuracies. */}
                 {m.value !== null && !m.lower_is_better && (
-                  <div className="mt-xxs h-1.5 rounded-pill bg-surface-card">
-                    <div className="h-full rounded-pill bg-primary" style={{ width: pct(m.value) }} />
+                  <div className="mt-xs h-1.5 overflow-hidden rounded-pill bg-surface-card">
+                    <div
+                      className={`h-full rounded-pill transition-[width] duration-700 ${
+                        good === false ? 'bg-error' : 'bg-primary'
+                      }`}
+                      style={{ width: pct(m.value) }}
+                    />
                   </div>
                 )}
               </div>
@@ -96,6 +124,7 @@ export default function Reliability() {
           </li>
         ))}
       </ul>
-    </main>
+      </main>
+    </>
   );
 }

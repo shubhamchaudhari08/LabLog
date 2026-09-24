@@ -16,10 +16,10 @@
 import type { ReactNode } from 'react';
 
 const STATUS_TONE: Record<string, string> = {
-  RUNNING: 'bg-success/15 text-success',
-  COMPLETED: 'bg-surface-card text-muted',
-  PAUSED: 'bg-accent-amber/20 text-warning',
-  CANCELLED: 'bg-error/10 text-error',
+  RUNNING: 'border-success/30 bg-success/10 text-success',
+  COMPLETED: 'border-hairline bg-surface-card text-muted',
+  PAUSED: 'border-accent-amber/30 bg-accent-amber/10 text-warning',
+  CANCELLED: 'border-error/25 bg-error/10 text-error',
 };
 
 export function ExperimentHeader({
@@ -38,22 +38,24 @@ export function ExperimentHeader({
   userEmail?: string | null;
 }) {
   return (
-    <header className="flex flex-wrap items-end justify-between gap-md border-b border-hairline pb-lg">
+    <header className="flex flex-wrap items-end justify-between gap-md">
       <div>
         <div className="flex items-center gap-sm">
-          <span className="text-caption-upper uppercase tracking-[1.5px] text-muted">{code}</span>
+          <span className="font-mono text-caption uppercase tracking-[1.5px] text-muted">
+            {code}
+          </span>
           <span
-            className={`rounded-pill px-sm py-xxs text-caption ${
-              STATUS_TONE[status] ?? 'bg-surface-card text-muted'
+            className={`rounded-sm border px-xs py-[3px] text-caption-upper uppercase ${
+              STATUS_TONE[status] ?? 'border-hairline bg-surface-card text-muted'
             }`}
           >
             {status.toLowerCase()}
           </span>
         </div>
-        <h1 className="mt-xxs text-display-sm">{name}</h1>
+        <h1 className="mt-xs max-w-[22ch] text-display-md">{name}</h1>
         {protocolName && (
-          <p className="mt-xxs text-body-sm text-muted">
-            {protocolName} {protocolVersion}
+          <p className="mt-xs text-body-sm text-muted">
+            {protocolName} <span className="text-muted-soft">{protocolVersion}</span>
           </p>
         )}
       </div>
@@ -89,14 +91,24 @@ export function ProtocolProgress({
           const done = step.index < currentIndex;
           const current = step.index === currentIndex;
           return (
-            <li key={step.id} className="flex items-start gap-sm py-xs">
+            <li key={step.id} className="relative flex items-start gap-sm py-[6px] pl-lg">
               <span
                 aria-hidden
-                className={`mt-[2px] w-4 text-center text-caption ${
-                  done ? 'text-success' : current ? 'text-primary' : 'text-muted-soft'
+                className={`absolute left-[7px] top-[24px] h-[calc(100%-14px)] w-px ${
+                  done ? 'bg-success/35' : 'bg-hairline'
+                }`}
+              />
+              <span
+                aria-hidden
+                className={`absolute left-0 top-[7px] grid h-[15px] w-[15px] place-items-center rounded-pill border text-[9px] leading-none ${
+                  done
+                    ? 'border-success/40 bg-success/15 text-success'
+                    : current
+                      ? 'border-primary bg-primary text-on-primary'
+                      : 'border-hairline bg-canvas text-muted-soft'
                 }`}
               >
-                {done ? '✓' : current ? '→' : '○'}
+                {done ? '✓' : ''}
               </span>
               <span
                 className={
@@ -131,10 +143,10 @@ export function SamplePanel({
         {samples.map((sample) => (
           <li
             key={sample.id}
-            className={`rounded-md border px-sm py-xxs text-body-sm ${
+            className={`rounded-sm border px-sm py-xxs font-mono text-body-sm transition-colors ${
               sample.sample_type === 'control'
                 ? 'border-hairline bg-surface-card text-muted'
-                : 'border-hairline bg-canvas text-ink'
+                : 'border-hairline bg-canvas text-ink hover:border-primary/40'
             }`}
           >
             {sample.sample_code}
@@ -162,13 +174,13 @@ export function ObservationPanel({
       ) : (
         <ul className="space-y-sm px-lg py-md">
           {observations.map((observation) => (
-            <li key={observation.id} className="text-body-sm text-body">
+            <li key={observation.id} className="animate-rise border-l-2 border-hairline pl-sm">
               {observation.samples?.sample_code && (
-                <span className="mr-xs text-title-sm text-ink">
+                <span className="mr-xs font-mono text-caption text-muted">
                   {observation.samples.sample_code}
                 </span>
               )}
-              {observation.observation}
+              <span className="text-body-sm text-body">{observation.observation}</span>
             </li>
           ))}
         </ul>
@@ -199,7 +211,7 @@ export function DeviationPanel({
               key={deviation.id}
               // Amber, not red: a deviation is a normal part of lab work that
               // must be recorded, not a fault to be alarmed about.
-              className="rounded-md border-l-2 border-accent-amber bg-accent-amber/[0.07] px-sm py-xs"
+              className="animate-rise rounded-sm border-l-2 border-accent-amber bg-accent-amber/[0.07] px-sm py-xs"
             >
               <p className="text-body-sm text-ink">{deviation.description}</p>
               {deviation.reason && (
@@ -239,7 +251,10 @@ export function ExperimentTimeline({
               key={event.id}
               className="flex items-baseline gap-sm border-b border-hairline-soft py-xs last:border-0"
             >
-              <time className="tabular w-16 shrink-0 text-caption text-muted-soft">
+              <time
+                dateTime={event.created_at}
+                className="tabular w-16 shrink-0 font-mono text-caption text-muted-soft"
+              >
                 {new Date(event.created_at).toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit',
@@ -278,4 +293,15 @@ function PanelShell({
 
 function Empty({ children }: { children: ReactNode }) {
   return <p className="px-lg py-lg text-body-sm text-muted-soft">{children}</p>;
+}
+
+/** Matches the shape of a loaded panel, so the layout does not jump. */
+export function PanelSkeleton({ rows = 2 }: { rows?: number }) {
+  return (
+    <div className="space-y-xs px-lg py-md" aria-hidden>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="skeleton h-4" style={{ width: `${88 - i * 22}%` }} />
+      ))}
+    </div>
+  );
 }
