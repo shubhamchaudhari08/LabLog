@@ -52,6 +52,61 @@ export const keys = {
   events: (id: string) => ['events', id] as const,
 };
 
+export interface ExperimentSummary {
+  id: string;
+  experiment_code: string;
+  name: string;
+  status: string;
+  current_step_index: number;
+  started_at: string | null;
+  completed_at: string | null;
+  protocols?: { name?: string; version?: string; steps?: ProtocolStep[] } | null;
+  /** PostgREST returns embedded aggregates as a one-element array. */
+  measurements?: { count: number }[];
+}
+
+export interface ProtocolSummary {
+  id: string;
+  protocol_code: string;
+  name: string;
+  version: string | null;
+  steps: ProtocolStep[];
+  experiments?: { count: number }[];
+}
+
+/** Index of every experiment the signed-in user owns. RUNNING first. */
+export function useExperimentList() {
+  return useQuery<ExperimentSummary[]>({
+    queryKey: ['experiments'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('experiments')
+        // The embedded count saves a query per row for the measurement tally.
+        .select('*, protocols(name, version, steps), measurements(count)')
+        .order('started_at', { ascending: false, nullsFirst: false });
+      if (error) throw error;
+
+      const rows = (data ?? []) as ExperimentSummary[];
+      return rows.sort((a, b) => Number(b.status === 'RUNNING') - Number(a.status === 'RUNNING'));
+    },
+  });
+}
+
+/** Protocols readable by this user: their own, plus shared library protocols. */
+export function useProtocolList() {
+  return useQuery<ProtocolSummary[]>({
+    queryKey: ['protocols'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('protocols')
+        .select('*, experiments(count)')
+        .order('protocol_code');
+      if (error) throw error;
+      return (data ?? []) as ProtocolSummary[];
+    },
+  });
+}
+
 export function useExperiment(experimentId: string) {
   return useQuery({
     queryKey: keys.experiment(experimentId),
