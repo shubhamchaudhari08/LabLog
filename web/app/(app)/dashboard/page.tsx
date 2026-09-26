@@ -14,7 +14,8 @@ import { usePageCrumbs, useCurrentUser } from '@/components/shell/AppShell';
 import { ExperimentListSkeleton, ExperimentRow } from '@/components/workspace/ExperimentList';
 import { StatusBadge } from '@/components/workspace/StatusBadge';
 import { IconArrow, IconMic, IconProtocol } from '@/components/icons';
-import { useExperimentList, useProtocolList, type ExperimentSummary } from '@/lib/queries/useExperiment';
+import { useExperimentList, useHomeCounts, useProtocolList, type ExperimentSummary } from '@/lib/queries/useExperiment';
+import { computeHomeStats } from '@/lib/stats';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -113,11 +114,12 @@ export default function Overview() {
   const user = useCurrentUser();
   const experiments = useExperimentList();
   const protocols = useProtocolList();
+  const counts = useHomeCounts();
 
   const list = experiments.data ?? [];
   const running = list.find((e) => e.status === 'RUNNING');
-  const completed = list.filter((e) => e.status === 'COMPLETED').length;
-  const readings = list.reduce((sum, e) => sum + (e.measurements?.[0]?.count ?? 0), 0);
+  const stats = computeHomeStats(list);
+  const dash = (loading: boolean, value: number) => (loading ? '—' : value);
   const name = (user?.user_metadata?.display_name as string | undefined)?.split(' ')[0];
 
   return (
@@ -145,11 +147,13 @@ export default function Overview() {
         )}
       </div>
 
-      <div className="mt-lg grid grid-cols-2 gap-md lg:grid-cols-4">
-        <Tile label="Experiments" value={experiments.isLoading ? '—' : list.length} hint={`${completed} completed`} />
-        <Tile label="Running now" value={experiments.isLoading ? '—' : list.filter((e) => e.status === 'RUNNING').length} />
-        <Tile label="Readings recorded" value={experiments.isLoading ? '—' : readings} hint="across all runs" />
-        <Tile label="Protocols" value={protocols.isLoading ? '—' : (protocols.data?.length ?? 0)} hint="in your library" />
+      <div className="mt-lg grid grid-cols-2 gap-md md:grid-cols-3 xl:grid-cols-6">
+        <Tile label="This week" value={dash(experiments.isLoading, stats.this_week)} hint={`${list.length} experiments in all`} />
+        <Tile label="Running now" value={dash(experiments.isLoading, stats.running)} />
+        <Tile label="Completed" value={dash(experiments.isLoading, stats.completed)} />
+        <Tile label="With deviations" value={dash(experiments.isLoading, stats.with_deviations)} />
+        <Tile label="Measurements" value={dash(counts.isLoading, counts.data?.measurements ?? 0)} hint="current values" />
+        <Tile label="Voice-recorded" value={dash(counts.isLoading, counts.data?.voiceEvents ?? 0)} hint="events by voice" />
       </div>
 
       <div className="mt-xxl grid gap-xl lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -186,6 +190,9 @@ export default function Overview() {
           <div className="flex items-baseline justify-between">
             <h2 id="library-heading" className="text-title-lg font-sans text-ink">
               Protocol library
+              {protocols.data && (
+                <span className="tabular ml-xs text-caption text-muted-soft">{protocols.data.length}</span>
+              )}
             </h2>
             <Link href="/protocols" className="text-body-sm text-muted transition-colors hover:text-primary">
               Open →

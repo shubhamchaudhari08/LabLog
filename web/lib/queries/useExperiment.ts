@@ -63,9 +63,11 @@ export interface ExperimentSummary {
   protocol_id: string | null;
   started_at: string | null;
   completed_at: string | null;
-  protocols?: { name?: string; version?: string; steps?: ProtocolStep[] } | null;
+  created_at?: string | null;
+  protocols?: { protocol_code?: string; name?: string; version?: string; steps?: ProtocolStep[] } | null;
   /** PostgREST returns embedded aggregates as a one-element array. */
   measurements?: { count: number }[];
+  deviations?: { count: number }[];
 }
 
 export interface ProtocolSummary {
@@ -85,12 +87,32 @@ export function useExperimentList() {
       const { data, error } = await supabase
         .from('experiments')
         // The embedded count saves a query per row for the measurement tally.
-        .select('*, protocols(name, version, steps), measurements(count)')
+        .select('*, protocols(protocol_code, name, version, steps), measurements(count), deviations(count)')
         .order('started_at', { ascending: false, nullsFirst: false });
       if (error) throw error;
 
       const rows = (data ?? []) as ExperimentSummary[];
       return rows.sort((a, b) => Number(b.status === 'RUNNING') - Number(a.status === 'RUNNING'));
+    },
+  });
+}
+
+/**
+ * Home tallies that are not per-experiment: current (non-superseded) readings,
+ * and events that carry a voice session id. Head-only counts under RLS
+ * (specs/003-post-mvp-features research R-211).
+ */
+export function useHomeCounts() {
+  return useQuery({
+    queryKey: ['home-counts'],
+    queryFn: async () => {
+      const [measurements, voiceEvents] = await Promise.all([
+        supabase.from('measurements').select('id', { count: 'exact', head: true }).is('superseded_by', null),
+        supabase.from('events').select('id', { count: 'exact', head: true }).not('voice_session_id', 'is', null),
+      ]);
+      if (measurements.error) throw measurements.error;
+      if (voiceEvents.error) throw voiceEvents.error;
+      return { measurements: measurements.count ?? 0, voiceEvents: voiceEvents.count ?? 0 };
     },
   });
 }

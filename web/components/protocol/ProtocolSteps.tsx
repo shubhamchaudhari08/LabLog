@@ -163,12 +163,14 @@ function StepDetail({
   samples,
   measurements,
   observations,
+  readOnly = false,
 }: {
   step: ProtocolStep;
   state: StepState;
   samples: StepSample[];
   measurements: MeasurementRow[];
   observations: StepObservation[];
+  readOnly?: boolean;
 }) {
   const types = readingsRequired(step);
   const stepObservations = observations.filter((o) => o.protocol_step_index === step.index);
@@ -213,7 +215,7 @@ function StepDetail({
         </ul>
       )}
 
-      {state === 'current' && (
+      {state === 'current' && !readOnly && (
         <p className="mt-sm inline-flex items-center gap-xs rounded-md bg-surface-dark px-sm py-xs text-[13px] text-on-dark">
           <IconMic className="h-4 w-4 text-primary" />
           <span className="text-on-dark-soft">Say</span>
@@ -231,6 +233,7 @@ export function ProtocolSteps({
   samples = [],
   measurements = [],
   observations = [],
+  readOnly = false,
 }: {
   steps: ProtocolStep[];
   /** Omit for a reference view with no progress. */
@@ -239,6 +242,8 @@ export function ProtocolSteps({
   samples?: StepSample[];
   measurements?: MeasurementRow[];
   observations?: StepObservation[];
+  /** A record, not a bench: no "Say …" voice cue on the current step. */
+  readOnly?: boolean;
 }) {
   const live = currentIndex !== undefined;
   const [open, setOpen] = useState<Set<number>>(() => new Set(live ? [currentIndex] : []));
@@ -382,6 +387,7 @@ export function ProtocolSteps({
                     samples={samples}
                     measurements={measurements}
                     observations={observations}
+                    readOnly={readOnly}
                   />
                 </div>
               </div>
