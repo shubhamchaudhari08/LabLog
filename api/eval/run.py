@@ -2,9 +2,11 @@
 
     cd api && ASSEMBLYAI_API_KEY=... python -m eval.run [--model claude-sonnet-4-6]
 
-Writes web/public/metrics.json, which the /reliability page renders. Only a
-complete run writes the file — a gateway failure aborts rather than recording a
-half-measured number.
+Each complete run is written once to api/eval/runs/<run_id>.json and never
+edited; web/public/metrics.json (latest) and web/public/eval-history.json (all
+runs) are regenerated from it for the /reliability page. Only a complete run
+writes anything — a gateway failure aborts rather than recording a
+half-measured number (specs/003-post-mvp-features/contracts/eval-runs.md).
 """
 
 from __future__ import annotations
@@ -43,7 +45,10 @@ OPENING = [
 ]
 
 UNIT_ALIAS = {"celsius": "c", "degrees celsius": "c", "°c": "c", "fahrenheit": "f", "grams": "g", "gram": "g"}
-OUT = Path(__file__).resolve().parents[2] / "web" / "public" / "metrics.json"
+PUBLIC = Path(__file__).resolve().parents[2] / "web" / "public"
+RUNS = Path(__file__).resolve().parent / "runs"
+OUT = PUBLIC / "metrics.json"
+HISTORY_KEYS = ("run_id", "generated_at", "git_sha", "model", "scenario_count", "metrics", "by_category")
 
 
 def execute(sb, experiment, name, args):
@@ -58,6 +63,9 @@ def execute(sb, experiment, name, args):
 
 
 def converse(model, key, scenario):
+    profile = scenario.get("profile", "bench")
+    if profile != "bench":
+        raise ValueError(f"profile {profile!r} is not supported yet")  # desk/setup land with T032
     # ponytail: in-memory store driven by the real handlers — measures the
     # validation layer, not Postgres. Point at a disposable Supabase experiment
     # if database-level behaviour ever needs measuring too.
@@ -120,31 +128,51 @@ def _matches(expected, name, calls):
     return False
 
 
+def _expected(expect):
+    """Every call a scenario requires, as [(tool, args)]: one, several ("all"), or none."""
+    if expect.get("all"):
+        return [(e["tool"], e.get("args", {})) for e in expect["all"]]
+    if expect.get("tool"):
+        return [(expect["tool"], expect.get("args", {}))]
+    return []
+
+
 def score(scenario, calls, text):
     expect = scenario["expect"]
     writes = [name for name, _, result in calls if name in MUTATING_TOOLS and result.get("success")]
-    tool, args = expect.get("tool"), expect.get("args", {})
+    wanted = _expected(expect)
 
-    if tool:
-        selected = any(name == tool and result.get("success") for name, _, result in calls)
-        false_record = any(name != tool for name in writes)
+    if wanted:
+        selected = all(any(name == tool and result.get("success") for name, _, result in calls) for tool, _ in wanted)
+        names = {tool for tool, _ in wanted}
+        expected_writes = sum(1 for tool, _ in wanted if tool in MUTATING_TOOLS)
+        false_record = any(name not in names for name in writes) or len(writes) > expected_writes
     else:
         selected = not writes
         false_record = bool(writes)
 
     def subset(*keys):
-        picked = {k: v for k, v in args.items() if k in keys}
-        return _matches(picked, tool, calls) if picked else None
+        checks = []
+        for tool, args in wanted:
+            picked = {k: v for k, v in args.items() if k in keys}
+            if picked:
+                checks.append(_matches(picked, tool, calls))
+        return all(checks) if checks else None
 
+    args_checks = [_matches(args, tool, calls) for tool, args in wanted if args]
     r = {
         "selected": selected,
         "false_record": false_record,
-        "args_ok": _matches(args, tool, calls) if args else None,
+        "args_ok": all(args_checks) if args_checks else None,
         "sample_ok": subset("sample_code"),
         "value_ok": subset("value", "new_value"),
+        "unit_ok": subset("unit"),
         "hallucination": None,
         "backend_ok": None,
     }
+    entities = [r[k] for k in ("sample_ok", "value_ok", "unit_ok") if r[k] is not None]
+    r["entity_ok"] = all(entities) if entities else None
+
     if expect.get("refuse"):
         # ponytail: string heuristic on the prompt's mandated refusal wording.
         # Swap for an LLM judge if phrasing drifts from the prompt.
@@ -177,11 +205,18 @@ def aggregate(results, model):
     except OSError:
         sha = "unknown"
 
+    now = datetime.now(timezone.utc)
+    sha = sha or "unknown"
+    profiles = defaultdict(int)
+    for sc, _, _, _ in results:
+        profiles[sc.get("profile", "bench")] += 1
+
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "run_id": f"{now:%Y%m%dT%H%M%SZ}_{sha}",
+        "generated_at": now.isoformat(timespec="seconds"),
         "scenario_count": len(results),
         "model": model,
-        "git_sha": sha or "unknown",
+        "git_sha": sha,
         "metrics": {
             "tool_selection_accuracy": _rate(col("selected")),
             "argument_accuracy": _rate(col("args_ok")),
@@ -192,8 +227,11 @@ def aggregate(results, model):
             "procedure_hallucination_rate": _rate([None if h is None else not h for h in col("hallucination")], lower_is_better=True),
             "backend_rejection_correctness": _rate(col("backend_ok")),
             "task_completion_rate": _rate(col("passed")),
+            "unit_accuracy": _rate(col("unit_ok")),
+            "entity_accuracy": _rate(col("entity_ok")),
         },
         "by_category": dict(by_cat),
+        "profile_counts": dict(profiles),
         "failures": [
             {
                 "scenario_id": sc["id"],
@@ -206,7 +244,44 @@ def aggregate(results, model):
             for sc, r, calls, text in results
             if not r["passed"]
         ],
+        # Every scenario, passes included: a drill-down of failures alone reads
+        # as a bug list, not a measurement (Constitution Principle V).
+        "details": [
+            {
+                "scenario_id": sc["id"],
+                "category": sc["category"],
+                "profile": sc.get("profile", "bench"),
+                "utterance": sc["utterance"],
+                "expected": sc["expect"],
+                "passed": bool(r["passed"]),
+                "calls": [
+                    {"tool": n, "args": a, "success": bool(res.get("success")), "error": res.get("error")}
+                    for n, a, res in calls
+                ],
+                "reply": text[:500],
+            }
+            for sc, r, calls, text in results
+        ],
     }
+
+
+def write_run(metrics, runs_dir=RUNS, public_dir=PUBLIC, latest=None):
+    """Persist one run immutably, then regenerate the two files the page reads."""
+    runs_dir, public_dir = Path(runs_dir), Path(public_dir)
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    public_dir.mkdir(parents=True, exist_ok=True)
+
+    body = json.dumps(metrics, indent=2)
+    with open(runs_dir / f"{metrics['run_id']}.json", "x", encoding="utf-8") as fh:  # "x": never overwrite
+        fh.write(body)
+
+    Path(latest or public_dir / "metrics.json").write_text(body, encoding="utf-8")
+
+    history = []
+    for path in sorted(runs_dir.glob("*.json")):  # run_id starts with a UTC timestamp: name order is time order
+        run = json.loads(path.read_text(encoding="utf-8"))
+        history.append({k: run.get(k) for k in HISTORY_KEYS})
+    (public_dir / "eval-history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
 
 
 def main():
@@ -227,8 +302,7 @@ def main():
         print(f"{'PASS' if r['passed'] else 'FAIL'}  {scenario['id']:<8} {scenario['utterance']}")
 
     metrics = aggregate(results, options.model)
-    options.out.parent.mkdir(parents=True, exist_ok=True)
-    options.out.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    write_run(metrics, latest=options.out)
     print(f"\n{metrics['metrics']['task_completion_rate']['passed']}/{len(results)} passed -> {options.out}")
 
 

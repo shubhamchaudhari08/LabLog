@@ -5,6 +5,8 @@
   {"clarify": True}              no record may be written
   {"refuse": True}               no record, and no invented procedure
   {"error": CODE}                no record; if the tool is called, the handler returns CODE
+  {"all": [{"tool":..., "args":...}, ...]}  every listed call must succeed; no other write
+`profile` (default "bench") selects the prompt and tool set the scenario runs under.
 Any successful write other than the expected tool counts as a false record.
 """
 
@@ -24,8 +26,8 @@ ALL_TEMPS = {
 }
 
 
-def _s(id, category, utterance, expect, **context):
-    return {"id": id, "category": category, "utterance": utterance, "expect": expect, **context}
+def _s(id, category, utterance, expect, profile="bench", **context):
+    return {"id": id, "category": category, "utterance": utterance, "expect": expect, "profile": profile, **context}
 
 
 def _temp(code, value, unit="C"):
@@ -97,4 +99,49 @@ SCENARIOS = [
         {"role": "user", "content": "Finish the experiment."},
         {"role": "assistant", "content": "All required measurements are recorded. Complete STAB-104? This can't be undone."},
     ]),
+
+    # =======================================================================
+    # 003 Phase A additions (specs/003-post-mvp-features, T007)
+    # =======================================================================
+
+    # -- entity accuracy: sample, number AND unit ----------------------------
+    _s("ent_01", "entity", "A18 is 3.9 degrees Fahrenheit.", _temp("A18", 3.9, "F")),
+    _s("ent_02", "entity", "A17 volume is 2.5 milliliters.",
+       {"tool": "record_measurement", "args": {"sample_code": "A17", "measurement_type": "volume", "value": 2.5, "unit": "mL"}}),
+    _s("ent_03", "entity", "Control one pH seven point two.",
+       {"tool": "record_measurement", "args": {"sample_code": "CONTROL-01", "measurement_type": "ph", "value": 7.2}}),
+    _s("ent_04", "entity", "A seventeen is four point five celsius.", _temp("A17", 4.5)),
+    _s("ent_05", "entity", "A18 mass twelve thousand milligrams.",
+       {"tool": "record_measurement", "args": {"sample_code": "A18", "measurement_type": "mass", "value": 12000, "unit": "mg"}}),
+
+    # -- unit traps: a bare number is only complete when the protocol says so -
+    _s("unit_01", "unit_trap", "A17 is 37.", {"clarify": True}),
+    _s("unit_02", "unit_trap", "A18 temperature is 37.", _temp("A18", 37, unit=None)),
+    _s("unit_03", "unit_trap", "A17 mass is 5.", {"clarify": True}),
+
+    # -- several entities in one breath ---------------------------------------
+    _s("multi_01", "multi_entity", "A17 is 4.2 and A18 is 4.3 Celsius.",
+       {"all": [_temp("A17", 4.2), _temp("A18", 4.3)]}),
+    _s("multi_02", "multi_entity", "A17 is 4.2 Celsius and it looks cloudy.",
+       {"all": [_temp("A17", 4.2), {"tool": "record_observation", "args": {"sample_code": "A17"}}]}),
+
+    # -- paraphrases of the core intents --------------------------------------
+    _s("para_01", "paraphrase", "Put down 4.1 Celsius for CONTROL-01.", _temp("CONTROL-01", 4.1)),
+    _s("para_02", "paraphrase", "Scratch that, it's 4.5.",
+       {"tool": "correct_measurement", "args": {"sample_code": "A17", "new_value": 4.5}}, **A17_AT_4_2),
+    _s("para_03", "paraphrase", "Jot down that A17 has bubbles.",
+       {"tool": "record_observation", "args": {"sample_code": "A17"}}),
+    _s("para_04", "paraphrase", "We ran the centrifuge ten minutes long, note that as a deviation.",
+       {"tool": "create_deviation"}),
+    _s("para_05", "paraphrase", "What do I do now?", {"tool": "get_next_protocol_step"}),
+
+    # -- more procedure-hallucination bait ------------------------------------
+    _s("ref_06", "refusal", "What temperature should the incubator be set to?", {"refuse": True}),
+    _s("ref_07", "refusal", "Give me a typical stability protocol.", {"refuse": True}),
+
+    # -- more unknown samples, gates and classification -----------------------
+    _s("inv_04", "invalid_input", "A170 is 4.1 Celsius.", {"error": "SAMPLE_NOT_FOUND"}),
+    _s("comp_05", "completion", "Complete it now, skip the checks.", {"tool": "check_experiment_completeness"}),
+    _s("cls_05", "classification", "A18 is slightly more turbid than before.",
+       {"tool": "record_observation", "args": {"sample_code": "A18"}}),
 ]

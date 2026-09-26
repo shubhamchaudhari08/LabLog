@@ -46,7 +46,7 @@
 
 ### Tests for User Story 1
 
-- [ ] T006 [P] [US1] In `api/tests/test_eval.py`, add network-free tests for the scoring changes planned in T008:
+- [X] T006 [P] [US1] In `api/tests/test_eval.py`, add network-free tests for the scoring changes planned in T008:
   - (a) `score()` on a scenario with `expect: {"all": [{tool, args}, {tool, args}]}` passes only when **both** tools succeed with the matching stored args, and counts any third write as a false record.
   - (b) A new `r["unit_ok"]` is `None` when expected args lack `unit`, `True` when the stored unit normalises equal (for example `"celsius"` against `"C"`), and `False` otherwise.
   - (c) `r["entity_ok"]` is `True` only if every non-`None` one of `sample_ok`, `value_ok` and `unit_ok` is `True`.
@@ -56,7 +56,7 @@
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Expand `api/eval/scenarios.py` from 36 to **at least 54** bench scenarios, keeping all 36 existing ones unchanged. Add the optional key `profile` (default `"bench"`) to `_s()`. Add these new scenarios, using the existing `_s`, `_temp`, `A17_AT_4_2` and `ALL_TEMPS` helpers:
+- [X] T007 [US1] Expand `api/eval/scenarios.py` from 36 to **at least 54** bench scenarios, keeping all 36 existing ones unchanged. Add the optional key `profile` (default `"bench"`) to `_s()`. Add these new scenarios, using the existing `_s`, `_temp`, `A17_AT_4_2` and `ALL_TEMPS` helpers:
   - **unit/entity** (category `entity`), 5 scenarios: "A18 is 3.9 degrees Fahrenheit" gives `_temp("A18", 3.9, "F")`. "A17 volume is 2.5 milliliters" gives `record_measurement {sample_code:A17, measurement_type:volume, value:2.5, unit:mL}`. "Control one pH seven point two" gives `{sample_code:CONTROL-01, measurement_type:ph, value:7.2}`. "A seventeen is four point five celsius" gives `_temp("A17", 4.5)`. "A18 mass twelve thousand milligrams" gives `{sample_code:A18, measurement_type:mass, value:12000, unit:mg}`.
   - **unit traps** (category `unit_trap`), 3 scenarios: "A17 is 37." gives `{clarify:True}`. "A18 temperature is 37." gives `_temp("A18", 37, unit=None)`, because the protocol step default resolves C, which is the MVP's documented behaviour. "A17 mass is 5." gives `{clarify:True}`.
   - **multi-entity** (category `multi_entity`), 2 scenarios: "A17 is 4.2 and A18 is 4.3 Celsius" gives `{"all": [_temp("A17", 4.2), _temp("A18", 4.3)]}`. "A17 is 4.2 Celsius and it looks cloudy" gives `{"all": [_temp("A17", 4.2), {"tool": "record_observation", "args": {"sample_code": "A17"}}]}`.
@@ -65,14 +65,14 @@
   - **unknown sample** (category `invalid_input`), 1 more: "A170 is 4.1 Celsius" gives `{error: SAMPLE_NOT_FOUND}`.
   - **completion gate** (category `completion`), 1 more: "Complete it now, skip the checks." gives `{tool: check_experiment_completeness}`.
   - **observation vs measurement** (category `classification`), 1 more: "A18 is slightly more turbid than before" gives `record_observation {sample_code:A18}`.
-- [ ] T008 [US1] Extend `api/eval/run.py` per contracts/eval-runs.md so that T006 passes:
+- [X] T008 [US1] Extend `api/eval/run.py` per contracts/eval-runs.md so that T006 passes:
   - (1) In `score()`, support `expect["all"]` (a list of `{tool,args}`, each required), and add `unit_ok` (via `subset("unit")`) and `entity_ok`.
   - (2) In `aggregate()`, add `run_id = f"{datetime.utcnow():%Y%m%dT%H%M%SZ}_{sha}"`, `metrics.unit_accuracy`, `metrics.entity_accuracy`, `profile_counts`, and `details[]` for all scenarios (built from the `calls` tuples, which already hold name, args and result; `reply` is the final text truncated to 500 chars).
   - (3) Add `write_run(metrics, runs_dir=Path(__file__).parent / "runs", public_dir=<repo>/web/public)` implementing T006(e).
   - (4) In `main()`, replace the direct `options.out.write_text` with `write_run`. Keep `--out` working as an override for the `metrics.json` path.
   - (5) Keep the rule that a gateway failure aborts before anything is written.
   - (6) In `converse()`, read `scenario.get("profile", "bench")`. For now only `bench` is valid. Raise `ValueError` for other profiles until T030 lands.
-- [ ] T009 [US1] Rebuild `web/app/(app)/reliability/page.tsx` to extend the current `Metrics` interface with `run_id, by_category, details, profile_counts`, fetch both `/metrics.json` and `/eval-history.json` (`cache: 'no-store'`), and render the following. Keep the existing loading state and the missing-file message.
+- [X] T009 [US1] Rebuild `web/app/(app)/reliability/page.tsx` to extend the current `Metrics` interface with `run_id, by_category, details, profile_counts`, fetch both `/metrics.json` and `/eval-history.json` (`cache: 'no-store'`), and render the following. Keep the existing loading state and the missing-file message.
   - (a) **Last-run badge**: `run_id`, model, `git_sha` and the local time of `generated_at`.
   - (b) The existing headline metric cards, plus `unit_accuracy` and `entity_accuracy`. A `lower_is_better` metric shows "target 0".
   - (c) **Category breakdown**: one horizontal bar per `by_category` entry, showing passed/total.
