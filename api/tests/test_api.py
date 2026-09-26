@@ -1,4 +1,4 @@
-"""T030, T038, T042 — the trust boundary, tested at the HTTP layer.
+﻿"""T030, T038, T042 â€” the trust boundary, tested at the HTTP layer.
 
 These are the tests that matter most. Everything else protects data quality;
 these protect the claim that the model can never write to something it does not
@@ -69,7 +69,7 @@ def post_tool(client, token, tool="record_measurement", **overrides):
 
 
 # ---------------------------------------------------------------------------
-# T030 — authentication
+# T030 â€” authentication
 # ---------------------------------------------------------------------------
 def test_missing_header_is_401(client, sb):
     assert post_tool(client, None).status_code == 401
@@ -105,7 +105,7 @@ def test_token_signed_with_another_secret_is_401(client, sb):
 
 
 # ---------------------------------------------------------------------------
-# T038 — authorization. The single most important test in the suite.
+# T038 â€” authorization. The single most important test in the suite.
 # ---------------------------------------------------------------------------
 def test_authenticated_but_not_the_owner_is_403_and_writes_nothing(client, sb):
     response = post_tool(client, make_token(OTHER_USER_ID))
@@ -130,7 +130,7 @@ def test_owner_succeeds(client, sb):
 
 
 # ---------------------------------------------------------------------------
-# T038 — dispatcher-level rejections
+# T038 â€” dispatcher-level rejections
 # ---------------------------------------------------------------------------
 def test_unknown_tool(client, sb):
     body = post_tool(client, make_token(OWNER_ID), tool="drop_database").json()
@@ -189,7 +189,7 @@ def test_tool_failures_use_http_200(client, sb):
 
 
 # ---------------------------------------------------------------------------
-# T042 — voice bootstrap
+# T042 â€” voice bootstrap
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def fake_token(monkeypatch):
@@ -233,7 +233,7 @@ def test_bootstrap_returns_the_contract_shape(client, sb, fake_token):
     assert config["input"]["format"]["encoding"] == "audio/pcm"
     assert config["output"]["format"]["encoding"] == "audio/pcm"
     assert config["input"]["turn_detection"]["interrupt_response"] is True
-    assert len(config["tools"]) == 10
+    assert len(config["tools"]) == 11
     assert "STAB-104" in config["system_prompt"]
     assert config["greeting"]
 
@@ -260,7 +260,7 @@ def test_bootstrap_leaks_no_privileged_credential(client, sb, fake_token):
 
 
 # ---------------------------------------------------------------------------
-# Asymmetric signing keys — the default for Supabase projects since May 2025.
+# Asymmetric signing keys â€” the default for Supabase projects since May 2025.
 # ---------------------------------------------------------------------------
 def test_es256_token_verified_via_jwks(client, sb, monkeypatch):
     from types import SimpleNamespace
@@ -291,3 +291,4 @@ def test_unsigned_token_is_rejected(client, sb):
     token = jwt.encode({"sub": OWNER_ID, "aud": "authenticated"}, None, algorithm="none")
     assert post_tool(client, token).status_code == 401
     assert sb.count("measurements") == 0
+

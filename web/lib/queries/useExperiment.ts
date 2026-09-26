@@ -28,6 +28,7 @@ export interface MeasurementRow {
   unit: string | null;
   raw_spoken_value: string | null;
   correction_reason: string | null;
+  protocol_step_index?: number | null;
   recorded_at: string;
   samples?: { sample_code: string } | null;
   /** Client-only: awaiting confirmation from the change stream. */
@@ -41,6 +42,7 @@ export interface ProtocolStep {
   id: string;
   name: string;
   required_fields?: string[];
+  default_unit?: Record<string, string>;
 }
 
 export const keys = {
@@ -58,6 +60,7 @@ export interface ExperimentSummary {
   name: string;
   status: string;
   current_step_index: number;
+  protocol_id: string | null;
   started_at: string | null;
   completed_at: string | null;
   protocols?: { name?: string; version?: string; steps?: ProtocolStep[] } | null;
@@ -215,6 +218,11 @@ export function applyOptimisticToolResult(
   data: Record<string, unknown>,
 ): void {
   if (tool === 'record_measurement') {
+    // The handler records against the experiment's current step; mirror that so
+    // the protocol rail ticks the reading off before the change stream arrives.
+    const stepIndex =
+      client.getQueryData<{ current_step_index?: number }>(keys.experiment(experimentId))
+        ?.current_step_index ?? null;
     client.setQueryData<MeasurementRow[]>(keys.measurements(experimentId), (prev = []) => [
       {
         id: String(data.measurement_id),
@@ -224,6 +232,7 @@ export function applyOptimisticToolResult(
         unit: (data.unit as string) ?? null,
         raw_spoken_value: null,
         correction_reason: null,
+        protocol_step_index: stepIndex,
         recorded_at: (data.recorded_at as string) ?? new Date().toISOString(),
         samples: { sample_code: String(data.sample_code) },
         _optimistic: true,
@@ -237,9 +246,10 @@ export function applyOptimisticToolResult(
     client.setQueryData<MeasurementRow[]>(keys.measurements(experimentId), (prev = []) => {
       const sampleCode = String(data.sample_code);
       const type = String(data.measurement_type);
-      const without = prev.filter(
-        (m) => !(m.samples?.sample_code === sampleCode && m.measurement_type === type),
-      );
+      const isTarget = (m: MeasurementRow) =>
+        m.samples?.sample_code === sampleCode && m.measurement_type === type;
+      const replaced = prev.find(isTarget);
+      const without = prev.filter((m) => !isTarget(m));
       return [
         {
           id: String(data.measurement_id),
@@ -249,6 +259,8 @@ export function applyOptimisticToolResult(
           unit: (data.unit as string) ?? null,
           raw_spoken_value: null,
           correction_reason: 'Voice correction',
+          // A correction supersedes a reading in place, so it keeps its step.
+          protocol_step_index: replaced?.protocol_step_index ?? null,
           recorded_at: new Date().toISOString(),
           samples: { sample_code: sampleCode },
           _optimistic: true,

@@ -95,7 +95,17 @@ async def get_current_user(authorization: str | None = Header(default=None)) -> 
             # Rejects "none" and anything unexpected before a key is chosen,
             # so a token cannot pick its own verification algorithm.
             raise jwt.InvalidAlgorithmError(alg)
-        payload = jwt.decode(token, key, algorithms=[alg], audience="authenticated")
+        # `iat` is not checked: a host clock running behind Supabase's sees every
+        # fresh token as issued in the future and rejected it until the clocks
+        # caught up. It proves nothing on its own; `exp` is what bounds a token,
+        # and that is still enforced.
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=[alg],
+            audience="authenticated",
+            options={"verify_iat": False},
+        )
     except jwt.PyJWTError:
         # Deliberately opaque: expired, wrong audience, bad signature and
         # malformed all collapse to one message. Distinguishing them tells an

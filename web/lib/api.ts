@@ -10,6 +10,7 @@
 
 import { env } from './env';
 import { getAccessToken } from './supabase';
+import type { ProtocolSummary } from './queries/useExperiment';
 import type { BootstrapResponse, ToolOutcome } from './voiceClient/types';
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -68,5 +69,66 @@ export async function callTool(request: ToolRequest): Promise<ToolOutcome> {
     };
   }
 
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// Settings — the measurement vocabulary, read-only (api/app/tools/vocabulary.py)
+// ---------------------------------------------------------------------------
+
+export interface MeasurementType {
+  name: string;
+  units: string[];
+  default_unit: string;
+  spoken_units: string[];
+  dimensionless: boolean;
+}
+
+export async function fetchMeasurementTypes(): Promise<MeasurementType[]> {
+  let response: Response;
+  try {
+    response = await fetch(`${env.apiUrl}/settings/measurement-types`, { headers: await authHeaders() });
+  } catch {
+    throw new Error("Couldn't reach the LabLog API. Check that it is running.");
+  }
+  if (!response.ok) throw new Error(`Could not load measurement types (${response.status}).`);
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// Protocols — created from the Protocols screen (contracts/protocols-api.md in
+// specs/002). Failures come back as HTTP 200 with success:false, like /tools.
+// ---------------------------------------------------------------------------
+
+export interface ProtocolDraft {
+  protocol_code: string;
+  name: string;
+  version: string;
+  steps: { name: string; readings: { type: string; unit?: string }[] }[];
+}
+
+export type CreateProtocolResult =
+  | { success: true; protocol: ProtocolSummary }
+  | { success: false; error: string; message: string; detail?: Record<string, unknown> };
+
+export async function createProtocol(draft: ProtocolDraft): Promise<CreateProtocolResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${env.apiUrl}/protocols`, {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: JSON.stringify(draft),
+    });
+  } catch {
+    throw new Error("Couldn't reach the LabLog API, so the protocol wasn't saved.");
+  }
+  if (response.status === 401) {
+    return {
+      success: false,
+      error: 'UNAUTHENTICATED',
+      message: 'Your session expired. Sign in again; your form is kept.',
+    };
+  }
+  if (!response.ok) throw new Error(`The protocol wasn't saved (${response.status}).`);
   return response.json();
 }

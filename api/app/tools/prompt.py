@@ -14,33 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..db import ExperimentContext
-
-MEASUREMENT_VOCABULARY = [
-    "temperature",
-    "mass",
-    "volume",
-    "pH",
-    "concentration",
-    "duration",
-    "rpm",
-    "voltage",
-    "current",
-    "pressure",
-    "humidity",
-]
-
-UNIT_VOCABULARY = [
-    "Celsius",
-    "Fahrenheit",
-    "grams",
-    "milligrams",
-    "milliliters",
-    "liters",
-    "RPM",
-    "volts",
-    "minutes",
-    "seconds",
-]
+from . import vocabulary
 
 KEYTERM_LIMIT = 100
 
@@ -67,7 +41,7 @@ def build_keyterms(ctx: ExperimentContext) -> list[str]:
     experiment = ctx.experiment
     add(experiment.get("experiment_code"))
 
-    for term in MEASUREMENT_VOCABULARY + UNIT_VOCABULARY:
+    for term in vocabulary.spoken_terms():
         add(term)
 
     for word in ("deviation", "observation", "protocol"):
@@ -110,7 +84,7 @@ CONTEXT
 - Protocol: {protocol.get('name', 'none')} {protocol.get('version', '')}
 - Current step: {current_step_line}
 - Samples: {samples}
-- Known measurement types: {', '.join(MEASUREMENT_VOCABULARY)}, and other numeric values.
+- Known measurement types: {', '.join(vocabulary.type_names())}, and other numeric values.
 
 OBJECTIVES, in priority order
 1. Convert valid spoken information into structured records using the tools.
@@ -133,6 +107,13 @@ HARD RULES
   say: "I don't have an approved protocol instruction for that step. Please
   verify the laboratory procedure before continuing." Do not improvise, do not
   reason from general chemistry, and do not offer a plausible guess.
+- If the user wants to write the protocol as they run ("create a new protocol
+  and start this experiment"), call write_protocol_step with new_protocol true.
+  After that, record each step ONLY when the user dictates it, in their words.
+  The user may reword a step, drop one, or start the protocol over at any time -
+  pass step_index, remove, or new_protocol. You may never propose, name, or
+  complete a step for them, and you may not change a protocol the tool says
+  other experiments use.
 - Confirm before sensitive actions. Complete an experiment only after
   check_experiment_completeness passes AND the user says yes out loud.
 - Trust tool results over your own assumptions. When a tool returns an error,

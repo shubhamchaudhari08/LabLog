@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
 from pydantic import ValidationError
 
 from app.db import ExperimentContext
@@ -31,6 +32,7 @@ from .scenarios import SCENARIOS
 
 GATEWAY = "https://llm-gateway.assemblyai.com/v1/chat/completions"
 # The gateway takes OpenAI-nested tool schemas; the voice agent takes flat ones.
+
 GATEWAY_TOOLS = [
     {"type": "function", "function": {k: s[k] for k in ("name", "description", "parameters")}}
     for s in TOOL_SCHEMAS
@@ -39,6 +41,7 @@ OPENING = [
     {"role": "user", "content": "Start experiment STAB-104."},
     {"role": "assistant", "content": "STAB-104 is running. Step 2 of 6: record initial temperature."},
 ]
+
 UNIT_ALIAS = {"celsius": "c", "degrees celsius": "c", "°c": "c", "fahrenheit": "f", "grams": "g", "gram": "g"}
 OUT = Path(__file__).resolve().parents[2] / "web" / "public" / "metrics.json"
 
@@ -79,7 +82,10 @@ def converse(model, key, scenario):
             json={"model": model, "messages": messages, "tools": GATEWAY_TOOLS},
             timeout=90,
         )
-        response.raise_for_status()
+        if response.is_error:
+            # The gateway explains itself in the body ("Your account does not have
+            # access to this LLM Gateway model"); a bare 400 hides that.
+            raise SystemExit(f"LLM Gateway {response.status_code} for model {model}: {response.text[:500]}")
         tool_calls, text = [], ""
         for choice in response.json()["choices"]:  # the gateway may split calls across choices
             content = choice["message"].get("content")
@@ -208,7 +214,10 @@ def main():
     parser.add_argument("--model", default=os.environ.get("EVAL_MODEL", "claude-sonnet-4-6"))
     parser.add_argument("--out", type=Path, default=OUT)
     options = parser.parse_args()
-    key = os.environ["ASSEMBLYAI_API_KEY"]
+    load_dotenv()  # same api/.env the server reads (app/main.py)
+    key = os.environ.get("ASSEMBLYAI_API_KEY")
+    if not key:
+        raise SystemExit("ASSEMBLYAI_API_KEY is not set. Put it in api/.env or export it.")
 
     results = []
     for scenario in SCENARIOS:

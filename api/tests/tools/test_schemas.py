@@ -1,4 +1,4 @@
-"""T033 — the tool schema shape the agent actually receives.
+"""T033 â€” the tool schema shape the agent actually receives.
 
 This file exists because the source brief specified the OpenAI-nested shape and
 the live API requires a flat one. That error would have presented as the agent
@@ -11,11 +11,12 @@ from app.tools.models import TOOL_REGISTRY
 from app.tools.schemas import TOOL_SCHEMAS
 
 
-def test_exactly_ten_tools():
-    # Ten or fewer is the documented ceiling for selection accuracy. A new tool
-    # must displace an existing one, so this is a real constraint, not a tally.
-    assert len(TOOL_SCHEMAS) == 10
-    assert len(TOOL_REGISTRY) == 10
+def test_tool_count_is_pinned():
+    # Ten is the documented ceiling for selection accuracy; write_protocol_step
+    # puts us one over, deliberately. The assertion stays pinned so the next
+    # tool has to displace one rather than drift the count again.
+    assert len(TOOL_SCHEMAS) == 11
+    assert len(TOOL_REGISTRY) == 11
 
 
 def test_schemas_are_flat_not_openai_nested():
@@ -23,8 +24,8 @@ def test_schemas_are_flat_not_openai_nested():
         assert schema["type"] == "function"
         assert "name" in schema, "name must be top level, not nested under 'function'"
         assert "function" not in schema, (
-            "OpenAI-nested shape detected. AssemblyAI expects the flat form — "
-            "see contracts/aai-websocket.md §5."
+            "OpenAI-nested shape detected. AssemblyAI expects the flat form â€” "
+            "see contracts/aai-websocket.md Â§5."
         )
         assert isinstance(schema["description"], str) and schema["description"]
         assert schema["parameters"]["type"] == "object"
@@ -41,7 +42,7 @@ def test_every_tool_holds_rather_than_speaking_filler():
 
 def test_no_tool_accepts_a_timestamp():
     # Constitution Principle I / FR-006: all times are server-generated. This is
-    # enforced structurally — there is nowhere to put a time.
+    # enforced structurally â€” there is nowhere to put a time.
     for schema in TOOL_SCHEMAS:
         for name in schema["parameters"].get("properties", {}):
             assert not any(
@@ -70,3 +71,4 @@ def test_measurement_type_is_not_a_closed_enum():
     # one: data corruption disguised as a validation success.
     schema = next(s for s in TOOL_SCHEMAS if s["name"] == "record_measurement")
     assert "enum" not in schema["parameters"]["properties"]["measurement_type"]
+

@@ -1,4 +1,4 @@
-"""T040, T060, T062, T066, T073, T075, T077, T080, T083, T087, T089 — handler behaviour.
+﻿"""T040, T060, T062, T066, T073, T075, T077, T080, T083, T087, T089 â€” handler behaviour.
 
 The organising rule of this file, from the Constitution's Development Workflow
 section:
@@ -18,6 +18,7 @@ import pytest
 
 from app.tools import handlers
 from app.tools.models import (
+    WriteProtocolStepArgs,
     CompleteExperimentArgs,
     CompleteProtocolStepArgs,
     CorrectMeasurementArgs,
@@ -41,7 +42,7 @@ def record(sb, experiment, **kwargs):
 
 
 # ---------------------------------------------------------------------------
-# T040 — get_active_experiment
+# T040 â€” get_active_experiment
 # ---------------------------------------------------------------------------
 def test_get_active_experiment_returns_context(sb, experiment):
     result = call(handlers.get_active_experiment, sb, experiment, NoArgs())
@@ -55,7 +56,7 @@ def test_get_active_experiment_returns_context(sb, experiment):
 
 
 # ---------------------------------------------------------------------------
-# T060 — record_measurement, happy path
+# T060 â€” record_measurement, happy path
 # ---------------------------------------------------------------------------
 def test_record_measurement_writes_row_and_event(sb, experiment):
     result = record(sb, experiment, raw_spoken_value="A seventeen is four point two Celsius")
@@ -80,7 +81,7 @@ def test_record_measurement_writes_row_and_event(sb, experiment):
 def test_response_echoes_stored_values_not_requested_ones(sb, experiment):
     # The agent's spoken confirmation is generated from this response. If
     # normalisation changed "control one" to CONTROL-01, the user must hear
-    # CONTROL-01 — what was actually written.
+    # CONTROL-01 â€” what was actually written.
     result = record(sb, experiment, sample_code="control one")
     assert result["success"] is True
     assert result["data"]["sample_code"] == "CONTROL-01"
@@ -94,7 +95,7 @@ def test_unit_resolves_from_the_protocol_step_default(sb, experiment):
 
 
 # ---------------------------------------------------------------------------
-# T062 — timestamps are server-generated
+# T062 â€” timestamps are server-generated
 # ---------------------------------------------------------------------------
 def test_caller_cannot_supply_a_timestamp(sb, experiment):
     # Structural: the model forbids unknown keys, so there is nowhere to put a
@@ -111,7 +112,7 @@ def test_recorded_at_is_present_and_server_side(sb, experiment):
 
 
 # ---------------------------------------------------------------------------
-# T066 — rejections. Each asserts NO ROW WAS WRITTEN.
+# T066 â€” rejections. Each asserts NO ROW WAS WRITTEN.
 # ---------------------------------------------------------------------------
 def test_unknown_sample_rejected_with_valid_codes(sb, experiment):
     result = record(sb, experiment, sample_code="A99")
@@ -157,7 +158,7 @@ def test_ambiguous_sample_asks_rather_than_guessing(sb, experiment):
 
 
 # ---------------------------------------------------------------------------
-# T073, T075 — corrections supersede, never delete
+# T073, T075 â€” corrections supersede, never delete
 # ---------------------------------------------------------------------------
 def test_correction_supersedes_and_preserves_history(sb, experiment):
     record(sb, experiment, value=4.2)
@@ -216,7 +217,7 @@ def test_only_one_live_row_after_repeated_corrections(sb, experiment):
 
 
 # ---------------------------------------------------------------------------
-# T077 — observations are not measurements
+# T077 â€” observations are not measurements
 # ---------------------------------------------------------------------------
 def test_observation_creates_no_measurement(sb, experiment):
     result = call(
@@ -241,7 +242,7 @@ def test_blank_observation_is_rejected(sb, experiment):
 
 
 # ---------------------------------------------------------------------------
-# T080 — protocol grounding
+# T080 â€” protocol grounding
 # ---------------------------------------------------------------------------
 def test_next_step_comes_from_stored_data(sb, experiment):
     result = call(handlers.get_next_protocol_step, sb, experiment, NoArgs())
@@ -276,7 +277,7 @@ def test_completing_a_step_advances_by_one(sb, experiment):
 
 
 # ---------------------------------------------------------------------------
-# T083 — deviations
+# T083 â€” deviations
 # ---------------------------------------------------------------------------
 def test_deviation_defaults(sb, experiment):
     result = call(
@@ -294,7 +295,7 @@ def test_deviation_defaults(sb, experiment):
 
 
 # ---------------------------------------------------------------------------
-# T087, T089 — the completion gate
+# T087, T089 â€” the completion gate
 # ---------------------------------------------------------------------------
 def test_completeness_lists_what_is_missing_per_sample(sb, experiment):
     record(sb, experiment, sample_code="A17")
@@ -384,3 +385,172 @@ def test_sample_history_returns_current_values_only(sb, experiment):
     )
     values = [m["value"] for m in result["data"]["measurements"]]
     assert values == [4.3]
+
+
+# ---------------------------------------------------------------------------
+# write_protocol_step - the protocol dictated during the run
+# ---------------------------------------------------------------------------
+
+
+def test_add_step_refuses_to_edit_a_shared_protocol(sb, experiment):
+    """The seeded STAB protocol is a library protocol; appending to it would
+    rewrite the next step for every other run that references it."""
+    before = list(sb.rows("protocols")[0]["steps"])
+
+    result = call(
+        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name="Vortex for 30 s")
+    )
+
+    assert result["success"] is False
+    assert result["error"] == "PROTOCOL_SHARED"
+    assert sb.rows("protocols")[0]["steps"] == before
+    assert sb.count("protocols") == 1
+
+
+def test_new_protocol_starts_a_draft_and_records_dictated_steps(sb, experiment):
+    experiment.update({"status": "DRAFT", "started_at": None, "protocol_id": None})
+    sb.table("experiments").update(
+        {"status": "DRAFT", "started_at": None, "protocol_id": None}
+    ).eq("id", experiment["id"]).execute()
+
+    # "Create a new protocol and start the current experiment" - no step yet.
+    opened = call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(new_protocol=True))
+    assert opened["success"] is True
+    assert opened["data"]["experiment_started"] is True
+    assert opened["data"]["step"] is None
+    assert experiment["status"] == "RUNNING"
+    assert experiment["started_at"]
+
+    # Nothing to read out, and nothing invented.
+    nxt = call(handlers.get_next_protocol_step, sb, experiment, NoArgs())
+    assert nxt["data"]["is_final"] is False
+    assert "first step" in nxt["data"]["message"]
+
+    first = call(
+        handlers.write_protocol_step,
+        sb,
+        experiment,
+        WriteProtocolStepArgs(name="Record initial temperature", required_fields=["temperature"]),
+    )
+    second = call(
+        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name="Incubate at 37 C")
+    )
+
+    steps = sb.rows("protocols")[-1]["steps"]
+    assert [s["name"] for s in steps] == ["Record initial temperature", "Incubate at 37 C"]
+    assert [s["index"] for s in steps] == [0, 1]
+    assert first["data"]["step"]["required_fields"] == ["temperature"]
+    # Dictating a step means you are now on it.
+    assert second["data"]["step_index"] == 1
+    assert experiment["current_step_index"] == 1
+
+    # A measurement against the live-authored step records normally.
+    assert record(sb, experiment)["success"] is True
+    assert {e["event_type"] for e in sb.rows("events")} >= {
+        "PROTOCOL_STEP_ADDED",
+        "MEASUREMENT_CREATED",
+    }
+
+
+def test_add_step_refused_on_a_completed_experiment(sb, experiment):
+    experiment["status"] = "COMPLETED"
+    result = call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name="Too late"))
+    assert result["error"] == "EXPERIMENT_CLOSED"
+    assert sb.count("protocols") == 1
+
+
+
+def test_step_can_be_reworded_and_rescoped_without_moving_the_user(sb, experiment):
+    experiment["protocol_id"] = None
+    call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name="Step one"))
+    call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name="Step two"))
+
+    result = call(
+        handlers.write_protocol_step,
+        sb,
+        experiment,
+        WriteProtocolStepArgs(
+            step_index=0, name="Record initial temperature", required_fields=["temperature"]
+        ),
+    )
+
+    assert result["data"]["action"] == "updated"
+    steps = sb.rows("protocols")[-1]["steps"]
+    assert steps[0]["name"] == "Record initial temperature"
+    assert steps[0]["required_fields"] == ["temperature"]
+    assert [s["name"] for s in steps] == ["Record initial temperature", "Step two"]
+    # Rewording step 1 must not drag the user back off step 2.
+    assert experiment["current_step_index"] == 1
+    assert sb.rows("events")[-1]["event_type"] == "PROTOCOL_STEP_UPDATED"
+
+
+def test_step_can_be_removed_and_the_rest_renumbered(sb, experiment):
+    experiment["protocol_id"] = None
+    for name in ("Step one", "Step two", "Step three"):
+        call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name=name))
+
+    result = call(
+        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_index=1, remove=True)
+    )
+
+    assert result["data"]["action"] == "removed"
+    steps = sb.rows("protocols")[-1]["steps"]
+    assert [s["name"] for s in steps] == ["Step one", "Step three"]
+    assert [s["index"] for s in steps] == [0, 1]
+    assert experiment["current_step_index"] == 1
+    assert sb.rows("events")[-1]["event_type"] == "PROTOCOL_STEP_REMOVED"
+
+
+def test_step_with_data_recorded_against_it_cannot_be_removed(sb, experiment):
+    experiment["protocol_id"] = None
+    call(
+        handlers.write_protocol_step,
+        sb,
+        experiment,
+        WriteProtocolStepArgs(name="Record initial temperature"),
+    )
+    record(sb, experiment)
+
+    result = call(
+        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_index=0, remove=True)
+    )
+
+    # Renumbering would re-attribute a stored measurement to another step.
+    assert result["error"] == "PROTOCOL_STEP_IN_USE"
+    assert len(sb.rows("protocols")[-1]["steps"]) == 1
+    # Rewording the same step is still allowed: the index does not move.
+    reword = call(
+        handlers.write_protocol_step,
+        sb,
+        experiment,
+        WriteProtocolStepArgs(step_index=0, name="Record temperature at t0"),
+    )
+    assert reword["success"] is True
+
+
+def test_starting_over_opens_a_new_protocol_and_keeps_the_discarded_one(sb, experiment):
+    experiment["protocol_id"] = None
+    call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name="Wrong step"))
+    discarded = experiment["protocol_id"]
+
+    result = call(
+        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(new_protocol=True)
+    )
+
+    assert result["data"]["protocol_created"] is True
+    assert experiment["protocol_id"] != discarded
+    assert experiment["current_step_index"] == 0
+    assert handlers._protocol(sb, experiment)["steps"] == []
+    # The abandoned draft is still on disk, with its step intact.
+    old = next(p for p in sb.rows("protocols") if p["id"] == discarded)
+    assert [s["name"] for s in old["steps"]] == ["Wrong step"]
+
+
+def test_unknown_step_index_is_rejected(sb, experiment):
+    experiment["protocol_id"] = None
+    call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name="Only step"))
+    result = call(
+        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_index=4, name="Nope")
+    )
+    assert result["error"] == "STEP_NOT_FOUND"
+    assert len(sb.rows("protocols")[-1]["steps"]) == 1

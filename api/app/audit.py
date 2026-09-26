@@ -14,15 +14,19 @@ EventType = Literal[
     "MEASUREMENT_CORRECTED",
     "OBSERVATION_CREATED",
     "DEVIATION_CREATED",
+    "PROTOCOL_STEP_ADDED",
+    "PROTOCOL_STEP_UPDATED",
+    "PROTOCOL_STEP_REMOVED",
     "PROTOCOL_STEP_COMPLETED",
     "EXPERIMENT_COMPLETED",
+    "PROTOCOL_CREATED",
 ]
 
 
 def write_event(
     sb,
     *,
-    experiment_id: str,
+    experiment_id: str | None,
     event_type: EventType,
     entity_type: str | None = None,
     entity_id: str | None = None,

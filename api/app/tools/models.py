@@ -12,9 +12,11 @@ nowhere to put one.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+
+from . import vocabulary
 
 
 class _Args(BaseModel):
@@ -40,11 +42,10 @@ class RecordMeasurementArgs(_Args):
     measurement_type: str = Field(
         ...,
         description=(
-            "What was measured: temperature, mass, volume, pH, concentration, "
-            "duration, rpm, voltage, current, pressure, humidity, or another "
+            f"What was measured: {', '.join(vocabulary.type_names())}, or another "
             "numeric type."
         ),
-        json_schema_extra={"examples": ["temperature", "mass", "volume", "pH", "rpm"]},
+        json_schema_extra={"examples": vocabulary.type_names()[:5]},
     )
     # Deliberately NOT a closed enum. A closed enum would make the agent coerce
     # an unlisted type into a listed one — data corruption disguised as a
@@ -92,6 +93,48 @@ class CompleteProtocolStepArgs(_Args):
     )
 
 
+class WriteProtocolStepArgs(_Args):
+    name: str | None = Field(
+        None,
+        description=(
+            "The step exactly as the user dictated it. Omit ONLY when starting a "
+            "new protocol before the user has said what the first step is, or "
+            "when changing a step's required_fields and nothing else."
+        ),
+        json_schema_extra={"examples": ["Record initial temperature", "Incubate at 37 C"]},
+    )
+    step_index: int | None = Field(
+        None,
+        description=(
+            "Zero-based index of an EXISTING step to change or remove. Omit to "
+            "append a new step at the end. Step 1 spoken aloud is index 0."
+        ),
+        ge=0,
+    )
+    remove: bool = Field(
+        False, description="Delete the step at step_index instead of changing it."
+    )
+    required_fields: list[str] | None = Field(
+        None,
+        description=(
+            "Measurement types this step requires for every sample, if the user "
+            "said so. Omit when they did not."
+        ),
+        json_schema_extra={"examples": [["temperature"], ["mass", "pH"]]},
+    )
+    new_protocol: bool = Field(
+        False,
+        description=(
+            "True only when the user asked for a new protocol for this run, or to "
+            "discard the one being written and start over. Opens an empty "
+            "protocol and starts the experiment; the discarded one is kept."
+        ),
+    )
+    protocol_name: str | None = Field(
+        None, description="Name for the new protocol, if the user gave one."
+    )
+
+
 class GetSampleHistoryArgs(_Args):
     sample_code: str = Field(..., json_schema_extra={"examples": ["A17", "CONTROL-01"]})
 
@@ -108,8 +151,11 @@ class CompleteExperimentArgs(_Args):
 
 # name -> (model, description that steers tool selection)
 #
-# Ten tools exactly. The documented ceiling for selection accuracy is ten, so a
-# new tool must displace an existing one (research.md R-010).
+# ponytail: eleven tools — one over the documented ten-tool ceiling for selection
+# accuracy (research.md R-010). write_protocol_step is the odd one out, and it
+# carries append/edit/remove/restart on one signature rather than spending four
+# slots; if selection accuracy drops, fold get_sample_history into
+# get_active_experiment.
 TOOL_REGISTRY: dict[str, tuple[type[_Args], str]] = {
     "get_active_experiment": (
         NoArgs,
@@ -147,6 +193,14 @@ TOOL_REGISTRY: dict[str, tuple[type[_Args], str]] = {
         CompleteProtocolStepArgs,
         "Mark the current protocol step complete and advance to the next.",
     ),
+    "write_protocol_step": (
+        WriteProtocolStepArgs,
+        "Write this experiment's protocol while the run is happening: append the "
+        "step the user just dictated (no step_index), reword or re-scope an "
+        "existing one (step_index), drop one (step_index + remove), or start the "
+        'protocol over (new_protocol). "Create a new protocol and start this '
+        'experiment" is new_protocol true. Never propose a step yourself.',
+    ),
     "get_sample_history": (
         GetSampleHistoryArgs,
         "Return recorded measurements and observations for one sample.",
@@ -165,6 +219,10 @@ TOOL_REGISTRY: dict[str, tuple[type[_Args], str]] = {
 
 # Tools that change state. The dispatcher requires a RUNNING experiment for
 # these and permits the rest regardless of status.
+#
+# write_protocol_step is deliberately absent: it is what *starts* a DRAFT
+# experiment, so gating it on RUNNING would make it unreachable. It enforces its
+# own, looser rule (not COMPLETED, not CANCELLED) in the handler.
 MUTATING_TOOLS: frozenset[str] = frozenset(
     {
         "record_measurement",
@@ -175,3 +233,53 @@ MUTATING_TOOLS: frozenset[str] = frozenset(
         "complete_experiment",
     }
 )
+
+
+# ---------------------------------------------------------------------------
+# POST /protocols — a protocol written from the Protocols screen, not a tool.
+#
+# Unknown keys are IGNORED here, unlike _Args: a browser that sends back
+# `index`, `id`, `owner_id` or `created_at` must not get to set them, and the
+# server derives all four itself (specs/002 FR-105, contracts/protocols-api.md).
+# ---------------------------------------------------------------------------
+
+
+def _text(min_length: int, max_length: int):
+    return Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=min_length, max_length=max_length)
+    ]
+
+
+class _Request(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class ReadingIn(_Request):
+    type: _text(1, 40)
+    unit: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)] | None = None
+
+    @field_validator("unit")
+    @classmethod
+    def _blank_is_none(cls, value: str | None) -> str | None:
+        return value or None
+
+
+class ProtocolStepIn(_Request):
+    name: _text(1, 200)
+    readings: list[ReadingIn] = Field(default_factory=list, max_length=20)
+
+
+class CreateProtocolRequest(_Request):
+    protocol_code: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=2,
+            max_length=32,
+            pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        ),
+    ]
+    name: _text(1, 200)
+    version: _text(1, 20) = "v1"
+    # ponytail: 200 is an abuse guard on a JSONB column, not a product limit.
+    steps: list[ProtocolStepIn] = Field(min_length=1, max_length=200)

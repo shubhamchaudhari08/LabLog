@@ -81,7 +81,9 @@ export function Ledger({ entries, loading }: { entries: Entry[]; loading?: boole
         <h2 id="ledger-heading" className="panel-label">
           Record
         </h2>
-        <span className="tabular text-caption text-muted-soft">{entries.length} entries</span>
+        <span className="tabular text-caption text-muted-soft">
+          {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+        </span>
       </header>
 
       {loading ? (
@@ -112,7 +114,7 @@ export function Ledger({ entries, loading }: { entries: Entry[]; loading?: boole
             >
               <time
                 dateTime={entry.at}
-                className="tabular w-12 shrink-0 font-mono text-caption text-muted-soft"
+                className="tabular w-[72px] shrink-0 whitespace-nowrap font-mono text-caption text-muted-soft"
               >
                 {time(entry.at)}
               </time>
@@ -123,7 +125,7 @@ export function Ledger({ entries, loading }: { entries: Entry[]; loading?: boole
               />
 
               {entry.sample && (
-                <span className="w-20 shrink-0 font-mono text-body-sm text-ink">
+                <span className="w-24 shrink-0 whitespace-nowrap font-mono text-body-sm text-ink">
                   {entry.sample}
                 </span>
               )}

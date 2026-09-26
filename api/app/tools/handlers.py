@@ -1,11 +1,11 @@
-"""Tool handlers — authorize → resolve → validate → write → audit → return.
+﻿"""Tool handlers â€” authorize â†’ resolve â†’ validate â†’ write â†’ audit â†’ return.
 
 Authorization already happened in the dispatcher, once, before any handler runs
 (research.md R-006). What remains here is *semantic* validation: structural
 validation proved the model produced well-formed arguments, not true ones.
 
 Every handler takes `sb` as a parameter and never constructs a client, which is
-what makes this layer — the product's central claim — testable without a live
+what makes this layer â€” the product's central claim â€” testable without a live
 database.
 
 Two rules hold throughout:
@@ -32,7 +32,9 @@ from .models import (
     NoArgs,
     RecordMeasurementArgs,
     RecordObservationArgs,
+    WriteProtocolStepArgs,
 )
+from . import vocabulary
 from .normalize import resolve_sample
 
 # ---------------------------------------------------------------------------
@@ -145,7 +147,7 @@ def get_active_experiment(*, sb, experiment, user_id, args: NoArgs, session_id=N
 
 
 # ---------------------------------------------------------------------------
-# 2. record_measurement — the core tool
+# 2. record_measurement â€” the core tool
 # ---------------------------------------------------------------------------
 
 
@@ -158,7 +160,7 @@ def record_measurement(
 
     # Pydantic accepts float('nan') as a valid float and Postgres `numeric`
     # accepts 'NaN'. A NaN measurement stores, renders, and silently poisons
-    # every aggregate downstream — so it needs an explicit guard.
+    # every aggregate downstream â€” so it needs an explicit guard.
     if not math.isfinite(args.value):
         return _err(
             "INVALID_VALUE",
@@ -171,14 +173,15 @@ def record_measurement(
     if not unit:
         step = _step_at(sb, experiment, step_index) or {}
         unit = (step.get("default_unit") or {}).get(args.measurement_type)
-    if not unit and args.measurement_type.lower() == "ph":
-        unit = "pH"  # dimensionless; asking "what unit?" would be absurd on camera
+    listed = vocabulary.lookup(args.measurement_type)
+    if not unit and listed and listed.dimensionless:
+        unit = listed.default_unit  # pH: asking "what unit?" would be absurd on camera
     if not unit:
         return _err(
             "UNIT_REQUIRED",
             f"What unit is that {args.measurement_type} in?",
             measurement_type=args.measurement_type,
-            suggested_units=_SUGGESTED_UNITS.get(args.measurement_type, []),
+            suggested_units=vocabulary.suggested_units(args.measurement_type),
         )
 
     inserted = (
@@ -226,18 +229,8 @@ def record_measurement(
     )
 
 
-_SUGGESTED_UNITS: dict[str, list[str]] = {
-    "temperature": ["C", "F"],
-    "mass": ["g", "mg", "kg"],
-    "volume": ["mL", "L"],
-    "concentration": ["mM", "M", "mg/mL"],
-    "duration": ["minutes", "seconds"],
-    "pressure": ["kPa", "bar"],
-}
-
-
 # ---------------------------------------------------------------------------
-# 3. correct_measurement — supersede, never delete
+# 3. correct_measurement â€” supersede, never delete
 # ---------------------------------------------------------------------------
 
 
@@ -410,7 +403,7 @@ def create_deviation(*, sb, experiment, user_id, args: CreateDeviationArgs, sess
 
 
 # ---------------------------------------------------------------------------
-# 6. get_next_protocol_step — reads an array element. Cannot generate.
+# 6. get_next_protocol_step â€” reads an array element. Cannot generate.
 # ---------------------------------------------------------------------------
 
 
@@ -424,6 +417,14 @@ def get_next_protocol_step(*, sb, experiment, user_id, args: NoArgs, session_id=
     """
     steps = _steps(sb, experiment)
     next_index = experiment.get("current_step_index", 0) + 1
+
+    if not steps:
+        # Live-authored protocol that has no steps yet: there is nothing to read
+        # out, and inventing one is the thing this handler exists to prevent.
+        return _ok(
+            is_final=False,
+            message="No protocol steps have been recorded yet. What is the first step?",
+        )
 
     if next_index >= len(steps):
         return _ok(is_final=True, message="That was the final step of the protocol.")
@@ -485,6 +486,213 @@ def complete_protocol_step(
 
 
 # ---------------------------------------------------------------------------
+# 7b. write_protocol_step â€” the protocol written while the run happens
+# ---------------------------------------------------------------------------
+
+
+def _protocol_is_shared(sb, protocol: dict[str, Any], experiment_id: str) -> bool:
+    """Would appending a step here rewrite someone else's approved procedure?
+
+    A library protocol (owner_id null) is shared by definition, and any protocol
+    a second experiment references is shared in fact. Editing either would
+    silently change the "next step" for a run nobody is looking at â€” the exact
+    failure FR-017 exists to prevent.
+    """
+    if protocol.get("owner_id") is None:
+        return True
+    users = (
+        sb.table("experiments").select("id").eq("protocol_id", protocol["id"]).execute()
+    ).data or []
+    return any(row["id"] != experiment_id for row in users)
+
+
+def _records_at_or_after(sb, experiment_id: str, index: int) -> bool:
+    """Is any recorded value stamped with this step index or a later one?
+
+    Removing a step renumbers everything after it, and a measurement's
+    `protocol_step_index` is already written â€” so a removal that renumbers a
+    stamped step silently re-attributes stored data to a different procedure.
+    Renaming is safe (the index does not move); removing under records is not.
+    """
+    for table in ("measurements", "observations"):
+        rows = (
+            sb.table(table).select("*").eq("experiment_id", experiment_id).execute()
+        ).data or []
+        for row in rows:
+            stamped = row.get("protocol_step_index")
+            if stamped is not None and stamped >= index:
+                return True
+    return False
+
+
+def write_protocol_step(
+    *, sb, experiment, user_id, args: WriteProtocolStepArgs, session_id=None
+):
+    """Author the protocol during the run: append, amend, remove, or start over.
+
+    Still no generative capability: every name stored here is the user's words
+    passed through, exactly as with an observation.
+
+    "Start over" opens a NEW protocol rather than emptying the current one, so
+    the discarded draft stays readable and the steps already-stored measurements
+    point at do not vanish underneath them (Constitution Principle II).
+    """
+    status = str(experiment.get("status", ""))
+    if status in ("COMPLETED", "CANCELLED"):
+        return _err(
+            "EXPERIMENT_CLOSED",
+            f"Experiment {experiment['experiment_code']} is {status.lower()}, "
+            "so its protocol can't be changed.",
+        )
+
+    name = (args.name or "").strip()
+    protocol = _protocol(sb, experiment)
+    created = args.new_protocol or not protocol
+
+    if created and (args.remove or args.step_index is not None):
+        return _err("INVALID_ARGS", "A new protocol has no steps to change yet.")
+    if not created and not name and args.step_index is None:
+        return _err("INVALID_ARGS", "What should I call that step?")
+
+    if created:
+        protocol = (
+            sb.table("protocols")
+            .insert(
+                {
+                    "protocol_code": f"ADHOC-{experiment['experiment_code']}",
+                    "name": args.protocol_name or f"{experiment['name']} (recorded live)",
+                    "version": "v1",
+                    "steps": [],
+                    "owner_id": user_id,  # owned, so it stays editable during the run
+                }
+            )
+            .execute()
+        ).data[0]
+        sb.table("experiments").update({"protocol_id": protocol["id"]}).eq(
+            "id", experiment["id"]
+        ).execute()
+        experiment["protocol_id"] = protocol["id"]
+    elif _protocol_is_shared(sb, protocol, experiment["id"]):
+        return _err(
+            "PROTOCOL_SHARED",
+            f"{protocol.get('name')} is an approved protocol other experiments use, "
+            "so I can't change it. Say \"create a new protocol\" and I'll start one "
+            "for this run.",
+            protocol_name=protocol.get("name"),
+        )
+
+    steps = list(protocol.get("steps") or [])
+    index = args.step_index
+    if index is not None and index >= len(steps):
+        return _err(
+            "STEP_NOT_FOUND",
+            f"There's no step {index + 1}; the protocol has {len(steps)}.",
+            step_count=len(steps),
+        )
+
+    step: dict[str, Any] | None = None
+    event_type = "PROTOCOL_STEP_ADDED"
+    # `None` leaves the current step alone: rewording step 2 must not drag the
+    # user back to it while they are working on step 4.
+    moved_to: int | None = None
+
+    if args.remove:
+        if index is None:
+            return _err("INVALID_ARGS", "Which step should I remove?")
+        if _records_at_or_after(sb, experiment["id"], index):
+            return _err(
+                "PROTOCOL_STEP_IN_USE",
+                f"Data is already recorded from step {index + 1} onwards, so removing "
+                "it would renumber records that are already stored. I can reword it, "
+                "or log a deviation instead.",
+                step_index=index,
+            )
+        step = steps.pop(index)
+        for position, remaining in enumerate(steps):
+            remaining["index"] = position
+        event_type = "PROTOCOL_STEP_REMOVED"
+        moved_to = min(experiment.get("current_step_index", 0), max(len(steps) - 1, 0))
+
+    elif index is not None:
+        if not name and args.required_fields is None:
+            return _err("INVALID_ARGS", f"What should step {index + 1} say instead?")
+        step = dict(steps[index])
+        if name:
+            step["name"] = name
+        if args.required_fields is not None:
+            step["required_fields"] = args.required_fields
+        steps[index] = step
+        event_type = "PROTOCOL_STEP_UPDATED"
+
+    elif name:
+        step = {
+            "index": len(steps),
+            "id": f"step_{len(steps) + 1}",
+            "name": name,
+            "required_fields": args.required_fields or [],
+        }
+        steps.append(step)
+        # Dictating a step means you are now on it, so no separate advance is needed.
+        moved_to = step["index"]
+
+    else:
+        # A new protocol opened before the user has named the first step.
+        moved_to = 0
+
+    if step is not None:
+        # ponytail: read-modify-write of the steps array â€” two concurrent voice
+        # sessions on one experiment could drop a step. Move to a Postgres
+        # function with `steps = steps || $1` if that ever happens.
+        sb.table("protocols").update({"steps": steps}).eq("id", protocol["id"]).execute()
+
+    updates: dict[str, Any] = {}
+    if moved_to is not None:
+        updates["current_step_index"] = moved_to
+    started = status != "RUNNING"
+    if started:
+        updates["status"] = "RUNNING"
+        if not experiment.get("started_at"):
+            updates["started_at"] = _now()
+    if updates:
+        sb.table("experiments").update(updates).eq("id", experiment["id"]).execute()
+        experiment.update(updates)
+
+    write_event(
+        sb,
+        experiment_id=experiment["id"],
+        event_type=event_type,
+        entity_type="protocol",
+        entity_id=protocol["id"],
+        payload={
+            "step_index": (step or {}).get("index"),
+            "step_name": (step or {}).get("name"),
+            "required_fields": (step or {}).get("required_fields", []),
+            "protocol_created": created,
+            "experiment_started": started,
+        },
+        actor_id=user_id,
+        voice_session_id=session_id,
+    )
+
+    return _ok(
+        # "added" | "updated" | "removed" â€” so the spoken confirmation matches
+        # what was actually written rather than what was asked for.
+        action=event_type.removeprefix("PROTOCOL_STEP_").lower() if step else "opened",
+        protocol={
+            "id": protocol["id"],
+            "name": protocol.get("name"),
+            "step_count": len(steps),
+        },
+        step=step,  # None when a new protocol was opened with no step yet
+        steps=[{"index": s["index"], "name": s["name"]} for s in steps],
+        step_index=experiment.get("current_step_index", 0),
+        experiment_status=experiment["status"],
+        protocol_created=created,
+        experiment_started=started,
+    )
+
+
+# ---------------------------------------------------------------------------
 # 8. get_sample_history
 # ---------------------------------------------------------------------------
 
@@ -533,7 +741,7 @@ def get_sample_history(*, sb, experiment, user_id, args: GetSampleHistoryArgs, s
 
 
 # ---------------------------------------------------------------------------
-# 9. check_experiment_completeness — the integrity gate
+# 9. check_experiment_completeness â€” the integrity gate
 # ---------------------------------------------------------------------------
 
 
@@ -556,7 +764,7 @@ def _completeness(sb, experiment) -> dict[str, Any]:
     for step in steps:
         required = [f for f in step.get("required_fields", []) if f != "sample_id"]
         for field in required:
-            # ponytail: per-experiment, as data-model.md specifies — one reading per
+            # ponytail: per-experiment, as data-model.md specifies â€” one reading per
             # sample satisfies every step requiring that type. Scope by
             # protocol_step_index if repeat readings must be enforced.
             if field in seen_fields:
@@ -597,7 +805,7 @@ def check_experiment_completeness(*, sb, experiment, user_id, args: NoArgs, sess
 
 
 # ---------------------------------------------------------------------------
-# 10. complete_experiment — irreversible
+# 10. complete_experiment â€” irreversible
 # ---------------------------------------------------------------------------
 
 
@@ -611,7 +819,7 @@ def complete_experiment(
         )
 
     # Re-run the check here rather than trusting a previous tool call. The model
-    # could otherwise call this directly and skip the gate — and a gate the
+    # could otherwise call this directly and skip the gate â€” and a gate the
     # caller can skip is not a gate.
     state = _completeness(sb, experiment)
     if not state["complete"]:
@@ -647,3 +855,4 @@ def complete_experiment(
         completed_at=completed_at,
         summary=summary,
     )
+

@@ -224,7 +224,7 @@ A reviewer asks "how do you know it works?" and is shown a dashboard of accuracy
 
 ### In scope (MVP)
 
-Authenticated single-user access; a seeded demo protocol, experiment, samples and historical runs; one Experiment Workspace screen; the full voice loop with live transcript, spoken replies, status and interruption; validated tool execution for measurement capture, correction, observation, deviation, protocol navigation, step completion, completeness check, experiment completion, active-experiment context and sample history; ambiguity clarification; append-only audit trail; and a reliability evaluation with a dashboard.
+Authenticated single-user access; a seeded demo protocol, experiment, samples and historical runs; one Experiment Workspace screen; the full voice loop with live transcript, spoken replies, status and interruption; validated tool execution for measurement capture, correction, observation, deviation, protocol navigation, step completion, completeness check, experiment completion, active-experiment context and sample history; manual protocol creation from the Protocols screen (amended by `specs/002-manual-protocol-authoring/spec.md`); ambiguity clarification; append-only audit trail; and a reliability evaluation with a dashboard.
 
 ### Out of scope (deferred, in this order)
 
@@ -239,7 +239,7 @@ Organisation administration, billing, permission matrices, replacement of a labo
 ## Assumptions
 
 - A single demonstration account is sufficient; multi-user collaboration is not exercised.
-- The demonstration experiment, its protocol, its samples and its historical runs are seeded rather than created through the interface.
+- The demonstration experiment, its protocol, its samples and its historical runs are seeded rather than created through the interface. *Amended 2026-09-24:* protocols may also be created through the Protocols screen (`specs/002-manual-protocol-authoring/spec.md`); experiments, samples and runs remain seeded.
 - The demonstration environment is a desktop browser with microphone access, on a network path good enough for continuous audio streaming.
 - Protocol content is fictional and safe; no real laboratory procedure is prescribed by this system.
 - English speech only.

@@ -204,7 +204,7 @@ Written on **every** mutation, by every handler, without exception (FR-005, G7).
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid PK | |
-| `experiment_id` | uuid NOT NULL → `experiments` ON DELETE CASCADE | |
+| `experiment_id` | uuid → `experiments` ON DELETE CASCADE | NOT NULL until migration `0002`; null for protocol-level events (`PROTOCOL_CREATED`, specs/002) |
 | `event_type` | text NOT NULL | see below |
 | `entity_type` | text | `measurement` \| `observation` \| `deviation` \| `experiment` |
 | `entity_id` | uuid | |
@@ -215,7 +215,7 @@ Written on **every** mutation, by every handler, without exception (FR-005, G7).
 
 ### Event types
 
-`MEASUREMENT_CREATED` · `MEASUREMENT_CORRECTED` · `OBSERVATION_CREATED` · `DEVIATION_CREATED` · `PROTOCOL_STEP_COMPLETED` · `EXPERIMENT_COMPLETED`
+`MEASUREMENT_CREATED` · `MEASUREMENT_CORRECTED` · `OBSERVATION_CREATED` · `DEVIATION_CREATED` · `PROTOCOL_STEP_COMPLETED` · `EXPERIMENT_COMPLETED` · `PROTOCOL_CREATED` (experiment_id null for protocol-level events; specs/002)
 
 **Invariant that must hold at all times**: every row in `measurements`, `observations` and `deviations` has at least one corresponding `events` row. This is directly assertable (SC-008) and is the strongest single check that no write path bypasses the dispatcher.
 

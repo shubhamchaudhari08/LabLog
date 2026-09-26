@@ -124,12 +124,65 @@ const config: Config = {
         shimmer: {
           '100%': { transform: 'translateX(100%)' },
         },
+        'fade-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        // Sheets and docks arrive from the edge they belong to.
+        'slide-up': {
+          from: { opacity: '0', transform: 'translateY(12px) scale(0.985)' },
+          to: { opacity: '1', transform: 'none' },
+        },
+        'slide-in-left': {
+          from: { transform: 'translateX(-100%)' },
+          to: { transform: 'none' },
+        },
+        // A step becoming current: it settles into place rather than snapping.
+        'step-in': {
+          '0%': { opacity: '0.4', transform: 'translateX(-6px) scale(0.98)' },
+          '60%': { opacity: '1', transform: 'translateX(2px) scale(1.005)' },
+          '100%': { opacity: '1', transform: 'none' },
+        },
+        'check-draw': {
+          from: { strokeDashoffset: '16' },
+          to: { strokeDashoffset: '0' },
+        },
+        // The current-step beacon: a ring that leaves the node and fades.
+        beacon: {
+          '0%': { transform: 'scale(1)', opacity: '0.55' },
+          '100%': { transform: 'scale(2.3)', opacity: '0' },
+        },
+        // Listening orb: slow breathing, never a blink.
+        breathe: {
+          '0%, 100%': { transform: 'scale(1)', opacity: '0.35' },
+          '50%': { transform: 'scale(1.18)', opacity: '0.08' },
+        },
+        bar: {
+          '0%, 100%': { transform: 'scaleY(0.35)' },
+          '50%': { transform: 'scaleY(1)' },
+        },
       },
       animation: {
         'cell-land': 'cell-land 1.2s ease-out forwards',
         'pulse-soft': 'pulse-soft 1.6s ease-in-out infinite',
         rise: 'rise 420ms cubic-bezier(0.16, 1, 0.3, 1) both',
         shimmer: 'shimmer 1.6s infinite',
+        'fade-in': 'fade-in 240ms ease-out both',
+        'slide-up': 'slide-up 360ms cubic-bezier(0.16, 1, 0.3, 1) both',
+        'slide-in-left': 'slide-in-left 320ms cubic-bezier(0.16, 1, 0.3, 1) both',
+        'step-in': 'step-in 620ms cubic-bezier(0.16, 1, 0.3, 1) both',
+        'check-draw': 'check-draw 420ms 120ms cubic-bezier(0.65, 0, 0.35, 1) both',
+        beacon: 'beacon 1.8s cubic-bezier(0.16, 1, 0.3, 1) infinite',
+        breathe: 'breathe 2.4s ease-in-out infinite',
+        bar: 'bar 1s ease-in-out infinite',
+      },
+
+      // One scale, so nothing reaches for 9999.
+      zIndex: {
+        dock: '20',
+        header: '30',
+        sidebar: '40',
+        overlay: '50',
       },
     },
   },
