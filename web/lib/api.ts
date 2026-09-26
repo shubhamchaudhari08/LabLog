@@ -19,14 +19,14 @@ async function authHeaders(): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
-export async function fetchBootstrap(experimentId: string): Promise<BootstrapResponse> {
-  const response = await fetch(
-    `${env.apiUrl}/voice/bootstrap?experiment_id=${encodeURIComponent(experimentId)}`,
-    { headers: await authHeaders() },
-  );
+/** No experiment id: a desk session that can create, start or resume one (specs/003). */
+export async function fetchBootstrap(experimentId?: string): Promise<BootstrapResponse> {
+  const query = experimentId ? `?experiment_id=${encodeURIComponent(experimentId)}` : '';
+  const response = await fetch(`${env.apiUrl}/voice/bootstrap${query}`, { headers: await authHeaders() });
 
   if (!response.ok) {
     if (response.status === 403) throw new Error('You do not have access to this experiment.');
+    if (response.status === 409) throw new Error('This experiment is finished, so voice has nothing to record into.');
     if (response.status === 502) throw new Error('The voice service is unavailable right now.');
     throw new Error(`Could not start the voice session (${response.status}).`);
   }
@@ -36,7 +36,8 @@ export async function fetchBootstrap(experimentId: string): Promise<BootstrapRes
 export interface ToolRequest {
   tool: string;
   args: Record<string, unknown>;
-  experiment_id: string;
+  /** null in a desk session: no experiment is open yet. */
+  experiment_id: string | null;
   session_id: string | null;
 }
 

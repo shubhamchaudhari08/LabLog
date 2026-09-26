@@ -20,7 +20,8 @@ import type { User } from '@supabase/supabase-js';
 
 import { ensureSession, supabase } from '@/lib/supabase';
 import { applyReduceMotion, readReduceMotion } from '@/lib/prefs';
-import { useVoiceSession, STATUS_COPY, STATUS_DOT } from '@/components/voice/VoiceSession';
+import { useVoiceSession } from '@/components/voice/VoiceSession';
+import { DeskVoiceBar, HeaderVoiceControl } from '@/components/voice/GlobalVoice';
 import {
   IconChevron,
   IconChevronsLeft,
@@ -225,40 +226,6 @@ function Sidebar({
   );
 }
 
-/** Always-visible microphone state. Links back to the experiment it is bound to. */
-function HeaderVoiceChip() {
-  const voice = useVoiceSession();
-  if (!voice.bound || (!voice.live && voice.status !== 'error')) {
-    return (
-      <span className="hidden items-center gap-xs rounded-pill border border-hairline bg-canvas px-sm py-[6px] text-caption text-muted-soft md:inline-flex">
-        <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-muted-soft/60" />
-        Microphone off
-      </span>
-    );
-  }
-
-  return (
-    <Link
-      href={`/dashboard/experiments/${voice.bound.id}`}
-      className="group inline-flex items-center gap-xs rounded-pill border border-primary/25 bg-surface-dark py-[5px] pl-[10px] pr-sm text-caption text-on-dark shadow-panel transition-transform duration-200 hover:-translate-y-px"
-      aria-live="polite"
-    >
-      <span className="relative flex h-2 w-2">
-        {voice.live && (
-          <span
-            aria-hidden
-            className={`absolute inset-0 animate-beacon rounded-pill ${STATUS_DOT[voice.status]}`}
-          />
-        )}
-        <span className={`relative h-2 w-2 rounded-pill ${STATUS_DOT[voice.status]}`} />
-      </span>
-      <span>{STATUS_COPY[voice.status]}</span>
-      <span className="font-mono text-[11px] text-on-dark-soft">{voice.bound.code}</span>
-      {voice.muted && <span className="text-[11px] text-accent-amber">muted</span>}
-    </Link>
-  );
-}
-
 function Header({
   crumbs,
   onMenu,
@@ -299,7 +266,7 @@ function Header({
         </ol>
 
         <div className="ml-auto flex items-center gap-sm">
-          <HeaderVoiceChip />
+          <HeaderVoiceControl />
           <Link
             href="/settings/account"
             className="grid h-9 w-9 place-items-center rounded-md bg-surface-card text-[12px] font-semibold text-ink ring-1 ring-inset ring-hairline transition-colors hover:bg-surface-cream-strong"
@@ -396,6 +363,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="min-h-dvh transition-[padding] duration-300 ease-out lg:pl-[var(--sidebar-w)]">
             <Header crumbs={crumbs} onMenu={() => setDrawer(true)} user={user} />
             {children}
+            <DeskVoiceBar />
           </div>
         </div>
       </CrumbContext.Provider>

@@ -146,8 +146,8 @@
 
 **⚠️ GATE**: T022 requires **explicit owner approval**. If the owner declines A-1, stop here. US3–US5 stay deferred, and only the non-tool parts of US6 (T063–T067) may proceed.
 
-- [ ] T022 Ask the owner to approve amendment A-1. The text is in `specs/003-post-mvp-features/research.md` R-201. Once approved, edit `.specify/memory/constitution.md`: replace "The tool set MUST NOT exceed ten tools; adding one requires displacing another." with the A-1 text verbatim, bump the version to **1.1.0**, set **Last Amended** to the commit date, and add a Sync Impact note listing the affected artifacts (001 research R-010, `api/app/tools/models.py` registry comment, and 003 plan G15). Commit it as its own commit.
-- [ ] T023 **T-C0, the empirical gate (R-202)**. Write a throwaway script `api/scripts/tc0_tool_swap.py`, **not committed**, delete it after. The script opens a Voice Agent WebSocket using a token from the existing `_mint_token()`, sends the initial `session.update` with **only** `list_protocols`'s schema, waits for `session.ready`, then sends a second `session.update` with `{"tools": [record_measurement schema]}`. It must see `session.updated` with no `immutable_field` error. Next it sends a text or audio turn asking to record A17 at 4.2 Celsius, and asserts that a `tool.call` named `record_measurement` arrives. Record the result, the date, and a transcript excerpt under R-202 in `research.md`. **If the swap fails, stop and escalate to the owner with the evidence.** Do not build C–E.
+- [X] T022 *(Done 2026-09-26: the owner asked for voice to create and start experiments from any screen. Committed as 714b216, constitution 1.1.0.)* Ask the owner to approve amendment A-1. The text is in `specs/003-post-mvp-features/research.md` R-201. Once approved, edit `.specify/memory/constitution.md`: replace "The tool set MUST NOT exceed ten tools; adding one requires displacing another." with the A-1 text verbatim, bump the version to **1.1.0**, set **Last Amended** to the commit date, and add a Sync Impact note listing the affected artifacts (001 research R-010, `api/app/tools/models.py` registry comment, and 003 plan G15). Commit it as its own commit.
+- [ ] T023 *(Superseded for now: the desk-to-bench handover ends the desk session and opens a bench session, with the new greeting, rather than swapping tools mid-session. That uses only the verified open-time `session.update`. The mid-session tool swap stays unproven. SC-204's zero-reconnect goal is relaxed to one automatic reconnect.)* **T-C0, the empirical gate (R-202)**. Write a throwaway script `api/scripts/tc0_tool_swap.py`, **not committed**, delete it after. The script opens a Voice Agent WebSocket using a token from the existing `_mint_token()`, sends the initial `session.update` with **only** `list_protocols`'s schema, waits for `session.ready`, then sends a second `session.update` with `{"tools": [record_measurement schema]}`. It must see `session.updated` with no `immutable_field` error. Next it sends a text or audio turn asking to record A17 at 4.2 Celsius, and asserts that a `tool.call` named `record_measurement` arrives. Record the result, the date, and a transcript excerpt under R-202 in `research.md`. **If the swap fails, stop and escalate to the owner with the evidence.** Do not build C–E.
 - [ ] T024 [P] Create `supabase/migrations/0003_post_mvp.sql`, with exactly the SQL in data-model.md §1: `experiments_prev_run_idx on experiments (protocol_id, owner_id, status, completed_at desc)`, `samples_code_idx`, `deviations_exp_idx`, `experiments_owner_created_idx on experiments (owner_id, created_at desc)`, and `alter publication supabase_realtime add table samples`. All indexes use `create index if not exists`. Apply it to the Supabase project.
 - [ ] T025 [P] In `api/app/audit.py`, register the four new event types `EXPERIMENT_CREATED`, `PROTOCOL_ASSOCIATED`, `EXPERIMENT_STARTED` and `SAMPLE_CREATED`, following the existing pattern for `PROTOCOL_CREATED`. Do not change existing types.
 - [ ] T026 Add the six argument models to `api/app/tools/models.py` **verbatim from data-model.md §5**: `ListProtocolsArgs` (no fields), and `CreateExperimentArgs` with these fields:
@@ -234,6 +234,26 @@
 **Checkpoint**: The voice session supports desk, setup and bench profiles and live refresh. US3–US6 can begin.
 
 ---
+
+### Voice from any screen, delivered early (owner request, 2026-09-26)
+
+A slice of Phase 5 and US3, built to the owner's report: "not able to access the voice feature from dashboard/any screen … the user should be able to start the experiment using voice command". It also fixes two reported bugs. Profiles are **desk** (3 tools) and **bench** (the 11 existing). There is no `setup` profile and no `associate_protocol`: READY runs are started from the workspace button or by voice from desk.
+
+- [X] T081 Tool models `CreateExperimentArgs` (with `start`, default true) and `StartExperimentArgs`, registry entries, `TOOL_SCOPE` and `PROFILES` in `api/app/tools/models.py`. Add `tool_schemas(profile)`, keeping `TOOL_SCHEMAS` as the bench 11, in `api/app/tools/schemas.py`. The schema tests now pin the bench set and the per-profile cap.
+- [X] T082 `api/app/resolve.py`: protocol resolution (code → name → name+version → every spoken word in the name) and experiment resolution among the caller's own experiments. Ambiguity returns candidates.
+- [X] T083 `api/app/tools/lifecycle.py`: `list_protocols`, `create_experiment` (confirm first, then create through `app/lifecycle.py`, starting when a protocol is set) and `start_experiment` (resuming a RUNNING run writes nothing). Re-exported from `handlers.py`.
+- [X] T084 Dispatcher v2 in `api/app/routers/tools.py`: `experiment_id` is optional and routing is by scope. `experiment_ref` is resolved among the caller's own experiments before the explicit ownership check. `EXPERIMENT_REQUIRED` for bench tools with no experiment.
+- [X] T085 `GET /voice/bootstrap` without `experiment_id` gives a desk session (desk prompt, keyterms, 3 tools). A COMPLETED or CANCELLED experiment gives **409 `EXPERIMENT_CLOSED` before minting** (bug: a voice session could start on a completed run). The greeting leads with the experiment **name** (bug: "Experiment STAB-105" sounded like the protocol).
+- [X] T086 Eval: desk profile in the harness (`session_for`, scope-routed `execute`), and 7 desk scenarios (`desk_01`–`desk_07`, 63 total).
+- [X] T087 Web:
+  - `HeaderVoiceControl`: **Start voice** on every screen.
+  - `DeskVoiceBar`: shows the desk session on any page.
+  - `VoiceSession`: desk mode, and a handover once `create_experiment` or `start_experiment` succeeds. It lets the agent finish speaking, then opens the workspace and a bench session.
+  - The workspace binds only open runs and unbinds on leave.
+  - The `VoiceDock` shows a closed state and a "Use voice on X" handover.
+  - Home's recent runs route finished runs to the read-only record (bug).
+  - A stale-socket guard in `useVoiceAgent`.
+- [X] T088 Validation: 177 API and 30 web tests pass, and the build is clean. A live AssemblyAI desk session accepted the configuration (`session.updated` → `session.ready` → greeting). **A spoken end-to-end run in the browser is still pending.**
 
 ## Phase 6: User Story 3: Create and start an experiment by voice (Priority: P2) · Phase C
 

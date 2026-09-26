@@ -167,13 +167,15 @@ export interface TranscriptTurn {
 export interface BootstrapResponse {
   token: string;
   ws_url: string;
+  /** desk: no experiment open (create/start/resume only). bench: bound to `experiment`. */
+  profile?: 'desk' | 'bench';
   experiment: {
     id: string;
     code: string;
     name: string;
     status: string;
     current_step_index: number;
-  };
+  } | null;
   session_config: Record<string, unknown>;
 }
 

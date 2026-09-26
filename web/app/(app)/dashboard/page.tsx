@@ -117,8 +117,9 @@ function StartCard() {
         <div className="min-w-[min(100%,260px)] flex-1">
           <h2 className="text-display-sm text-on-dark">Start an experiment</h2>
           <p className="mt-xs text-body-sm text-on-dark-soft">
-            Name it, pick a protocol and list the samples. It opens at the bench, and the microphone records every
-            reading you say.
+            Fill in a short form, or press <span className="text-on-dark">Start voice</span> at the top and say
+            &ldquo;create an experiment called &hellip; using sample stability&rdquo;. Either way it opens at the bench,
+            and the microphone records every reading you say.
           </p>
         </div>
         <span className="btn-primary pointer-events-none">

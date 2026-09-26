@@ -24,6 +24,7 @@ import { AgentAudioPlayer } from './audio/player';
 import { startMicCapture, type MicCapture } from './audio/micWorklet';
 
 export interface UseVoiceAgentOptions {
+  /** Empty: a desk session with no experiment open (specs/003). */
   experimentId: string;
   /** Called on a successful tool result, for the optimistic cache patch. */
   onToolSuccess?: (tool: string, data: Record<string, unknown>) => void;
@@ -96,7 +97,7 @@ export function useVoiceAgent({
         outcome = await callTool({
           tool: name,
           args,
-          experiment_id: experimentId,
+          experiment_id: experimentId || null,
           session_id: sessionIdRef.current,
         });
       } catch {
@@ -209,7 +210,7 @@ export function useVoiceAgent({
     deliberateCloseRef.current = false;
 
     try {
-      const bootstrap = await fetchBootstrap(experimentId);
+      const bootstrap = await fetchBootstrap(experimentId || undefined);
       configRef.current = bootstrap.session_config;
 
       void playerRef.current?.close();
@@ -235,6 +236,7 @@ export function useVoiceAgent({
       };
 
       socket.onmessage = (event) => {
+        if (socketRef.current !== socket) return; // a replaced session still draining
         try {
           handleMessage(JSON.parse(event.data) as ServerMessage);
         } catch {
@@ -245,11 +247,15 @@ export function useVoiceAgent({
       };
 
       socket.onerror = () => {
+        if (socketRef.current !== socket) return;
         setError('Voice connection error.');
         setStatus('error');
       };
 
       socket.onclose = () => {
+        // A session replaced by a switch (desk → experiment) closes late; ignore it,
+        // or its close would look like a dropped connection and trigger a reconnect.
+        if (socketRef.current !== socket) return;
         readyRef.current = false;
         void micRef.current?.stop();
         micRef.current = null;

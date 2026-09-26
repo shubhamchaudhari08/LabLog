@@ -46,9 +46,61 @@ function Meter({ status, muted }: { status: VoiceStatusValue; muted: boolean }) 
   );
 }
 
-export function VoiceDock({ experimentId, experimentCode }: { experimentId: string; experimentCode: string }) {
+export function VoiceDock({
+  experimentId,
+  experimentCode,
+  closed = false,
+}: {
+  experimentId: string;
+  experimentCode: string;
+  /** COMPLETED or CANCELLED: no session may start here (the API refuses it too). */
+  closed?: boolean;
+}) {
   const voice = useVoiceSession();
   const [open, setOpen] = useState(false);
+
+  if (closed) {
+    return (
+      <div className="sticky bottom-md z-dock mt-xl">
+        <div className="panel-dark flex flex-wrap items-center gap-md rounded-xl px-lg py-md">
+          <IconMicOff className="h-5 w-5 text-on-dark-soft" />
+          <p className="flex-1 text-body-sm text-on-dark">
+            <span className="font-mono text-primary">{experimentCode}</span> is finished, so voice has nothing to
+            record into. Its record stays readable here.
+          </p>
+          <Link href="/experiments/new" className="btn-dark h-9">
+            New experiment
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // A desk session (no experiment) is live: offer to move it onto this experiment.
+  if (voice.live && !voice.bound) {
+    return (
+      <div className="sticky bottom-md z-dock mt-xl">
+        <div className="panel-dark flex flex-wrap items-center gap-md rounded-xl px-lg py-md">
+          <span className={`h-2 w-2 animate-pulse-soft rounded-pill ${STATUS_DOT[voice.status]}`} />
+          <p className="flex-1 text-body-sm text-on-dark">
+            {voice.switching
+              ? `Switching voice to ${voice.switching.code || 'the new experiment'}…`
+              : 'Voice is open with no experiment. Use it here to record into this run.'}
+          </p>
+          {!voice.switching && (
+            <button
+              type="button"
+              className="btn-primary h-9"
+              onClick={() => voice.switchTo({ id: experimentId, code: experimentCode })}
+            >
+              <IconMic className="h-4 w-4" />
+              Use voice on {experimentCode}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const elsewhere = voice.live && voice.bound && voice.bound.id !== experimentId;
   const live = voice.live && !elsewhere;

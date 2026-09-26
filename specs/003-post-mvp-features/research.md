@@ -50,6 +50,10 @@ This is a MINOR version bump (1.0.0 → 1.1.0), since the guidance is materially
 
 ---
 
+**Update 2026-09-26 (as built)**: Only `desk` and `bench` are shipped. The desk-to-bench handover **reconnects**: the desk session ends and a bench session opens with the new greeting. This avoids depending on the unverified mid-session tool swap. A live check confirmed that AssemblyAI accepts the desk configuration. It also showed that tool objects carry a `session_update` field, which is worth investigating as a zero-reconnect path.
+
+---
+
 ## R-203: Eval run persistence: committed JSON files, not an `eval_runs` table
 
 **Decision**: `api/eval/run.py` writes `api/eval/runs/<UTC yyyymmddTHHMMSSZ>_<sha>.json` (full record, immutable, committed). It then regenerates two derived files:

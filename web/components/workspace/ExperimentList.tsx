@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { ExperimentSummary } from '@/lib/queries/useExperiment';
 import { StatusBadge } from './StatusBadge';
 import { IconArrow } from '@/components/icons';
+import { experimentHref } from '@/lib/history';
 
 export function when(experiment: ExperimentSummary) {
   const iso = experiment.completed_at ?? experiment.started_at;
@@ -40,7 +41,7 @@ export function ExperimentRow({ experiment, index = 0 }: { experiment: Experimen
   return (
     <li className="animate-rise" style={{ animationDelay: `${index * 45}ms` }}>
       <Link
-        href={`/dashboard/experiments/${experiment.id}`}
+        href={experimentHref(experiment)}
         className="group grid grid-cols-[1fr_auto] items-center gap-x-md gap-y-xxs px-md py-sm transition-colors duration-200 hover:bg-surface-soft sm:grid-cols-[112px_minmax(0,1fr)_auto_auto_auto_20px]"
       >
         <span className="font-mono text-body-sm font-medium text-ink">{experiment.experiment_code}</span>

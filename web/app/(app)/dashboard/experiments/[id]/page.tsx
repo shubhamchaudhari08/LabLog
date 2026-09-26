@@ -188,10 +188,14 @@ export default function ExperimentWorkspace() {
   const events = useEvents(experimentId);
 
   const code = experiment.data?.experiment_code as string | undefined;
-  const { bind } = voice;
+  const loadedStatus = experiment.data?.status as string | undefined;
+  const closed = loadedStatus === 'COMPLETED' || loadedStatus === 'CANCELLED';
+  const { bind, unbind } = voice;
+  // A finished run is never bound: the microphone would have nothing to record into.
   useEffect(() => {
-    if (code) bind({ id: experimentId, code });
-  }, [bind, experimentId, code]);
+    if (code && loadedStatus && !closed) bind({ id: experimentId, code });
+    return () => unbind(experimentId);
+  }, [bind, unbind, experimentId, code, loadedStatus, closed]);
 
   usePageCrumbs([
     { label: 'Experiments', href: '/experiments' },
@@ -312,7 +316,7 @@ export default function ExperimentWorkspace() {
           <ExperimentTimeline events={events.data ?? []} />
         </div>
 
-        <VoiceDock experimentId={experimentId} experimentCode={code ?? '—'} />
+        <VoiceDock experimentId={experimentId} experimentCode={code ?? '—'} closed={closed} />
       </main>
 
       {/* the rail: sticky under the header, scrolls on its own */}
