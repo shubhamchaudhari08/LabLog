@@ -1,4 +1,16 @@
 <!--
+AMENDMENT A-1 (1.0.0 → 1.1.0, MINOR), 2026-09-26
+  Changed: "The tool set MUST NOT exceed ten tools" → a per-session-configuration
+  cap of twelve, with state-scoped profiles from one registry, evidence-gated by eval.
+  Rationale: the owner asked for voice to be usable from any screen, including
+  creating and starting an experiment. There is no experiment to bind to at that
+  point, so a separate "desk" tool set is needed. The registry already held 11
+  tools under the old cap (see models.py). Source: specs/003-post-mvp-features
+  research R-201.
+  Artifacts that relied on the old text: 001 research R-010,
+  api/app/tools/models.py registry comment, 003 plan G15.
+-->
+<!--
 SYNC IMPACT REPORT (scratch — remove before committing the amended constitution)
 
 Version change: TEMPLATE (unratified placeholders) → 1.0.0
@@ -187,7 +199,11 @@ amendment recorded under Governance:
   directly against our endpoints by the platform, so that each call carries the
   end user's own credential. The model MUST NOT be permitted to assert user identity
   through a tool argument.
-- The tool set MUST NOT exceed ten tools; adding one requires displacing another.
+- No single session configuration may expose more than twelve tools. A tool set
+  may be split into state-scoped profiles drawn from one registry (for example: no
+  experiment open, or an experiment bound). Raising any profile's size requires an
+  eval run showing that profile's tool-selection accuracy is no lower than the prior
+  baseline on the same model. *(Amendment A-1, 2026-09-26.)*
 
 **Deliberate non-goals.** Unit conversion, cross-browser audio support, organizational
 administration, permission matrices, instrument integration, and document ingestion are
@@ -258,4 +274,4 @@ principle.
 model under `specs/` for day-to-day direction. Those documents MUST conform to this
 constitution; where they conflict, this document governs.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-15 | **Last Amended**: 2026-09-15
+**Version**: 1.1.0 | **Ratified**: 2026-09-15 | **Last Amended**: 2026-09-26
