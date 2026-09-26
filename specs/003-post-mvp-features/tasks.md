@@ -21,9 +21,9 @@
 
 **Purpose**: Start from a clean, committed baseline, so any regression is attributable to 003.
 
-- [ ] T001 Commit the current uncommitted tree (the 002 manual protocol authoring feature, the `web/app/(app)/` route group, `AppShell`, `VoiceSession`, `VoiceDock`, `api/app/tools/vocabulary.py`, the settings and protocols routers, and migration 0002) on `001-lablog-voice-notebook` with a descriptive message. Then create and switch to the branch `003-post-mvp-features` (`git checkout -b 003-post-mvp-features`). Confirm with the user before committing, because the changes are theirs.
-- [ ] T002 Record the baseline. Run `cd api && pytest -q` and `cd web && npm run build && npm test`, and paste the pass counts into a new section "Baseline (T002)" at the bottom of `docs/RECONCILE.md`. Every later phase compares against these counts.
-- [ ] T003 [P] Create the directories `api/eval/runs/` (add `api/eval/runs/.gitkeep`) and `web/public/` (add `web/public/.gitkeep`). Both are committed, not gitignored (research R-203).
+- [X] T001 Commit the current uncommitted tree (the 002 manual protocol authoring feature, the `web/app/(app)/` route group, `AppShell`, `VoiceSession`, `VoiceDock`, `api/app/tools/vocabulary.py`, the settings and protocols routers, and migration 0002) on `001-lablog-voice-notebook` with a descriptive message. Then create and switch to the branch `003-post-mvp-features` (`git checkout -b 003-post-mvp-features`). Confirm with the user before committing, because the changes are theirs.
+- [X] T002 Record the baseline. Run `cd api && pytest -q` and `cd web && npm run build && npm test`, and paste the pass counts into a new section "Baseline (T002)" at the bottom of `docs/RECONCILE.md`. Every later phase compares against these counts.
+- [X] T003 [P] Create the directories `api/eval/runs/` (add `api/eval/runs/.gitkeep`) and `web/public/` (add `web/public/.gitkeep`). Both are committed, not gitignored (research R-203).
 
 ---
 
@@ -31,8 +31,8 @@
 
 **Purpose**: Test-store capabilities that later stories' tests need. There are no behaviour changes.
 
-- [ ] T004 Extend the in-memory `_Query` in `api/tests/conftest.py`. Add the filter methods `neq(column, value)`, `in_(column, values)`, `gte(column, value)`, `lt(column, value)` and `ilike(column, pattern)`, where `ilike` handles case-insensitive `%` wildcards and treats `\%` and `\_` as literals. Evaluate them in `_matches`, mirroring supabase-py's chaining API so that handlers call the same methods against the real client. Add a `unique` option to `FakeSupabase`: `FakeSupabase.unique = {"experiments": ["experiment_code"], "samples": [("experiment_id", "sample_code")]}`. `insert` must raise an exception whose `str()` contains `"duplicate key value violates unique constraint"`, which is the message the real client's `APIError` carries. Add unit tests for each new filter and for the unique violation in `api/tests/test_fake_store.py`.
-- [ ] T005 Run quickstart §0. All pre-existing suites must still pass unchanged after T004.
+- [X] T004 Extend the in-memory `_Query` in `api/tests/conftest.py`. Add the filter methods `neq(column, value)`, `in_(column, values)`, `gte(column, value)`, `lt(column, value)` and `ilike(column, pattern)`, where `ilike` handles case-insensitive `%` wildcards and treats `\%` and `\_` as literals. Evaluate them in `_matches`, mirroring supabase-py's chaining API so that handlers call the same methods against the real client. Add a `unique` option to `FakeSupabase`: `FakeSupabase.unique = {"experiments": ["experiment_code"], "samples": [("experiment_id", "sample_code")]}`. `insert` must raise an exception whose `str()` contains `"duplicate key value violates unique constraint"`, which is the message the real client's `APIError` carries. Add unit tests for each new filter and for the unique violation in `api/tests/test_fake_store.py`.
+- [X] T005 Run quickstart §0. All pre-existing suites must still pass unchanged after T004.
 
 **Checkpoint**: The baseline is committed, and the test store can support search, collision and lifecycle tests.
 

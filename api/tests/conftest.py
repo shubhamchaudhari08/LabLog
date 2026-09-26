@@ -11,6 +11,7 @@ postgrest-py chaining API for the handlers to run unmodified.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -25,6 +26,24 @@ PROTOCOL_ID = "44444444-4444-4444-4444-444444444444"
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _like_regex(pattern: str) -> re.Pattern[str]:
+    r"""SQL LIKE → regex. `%` and `_` are wildcards; `\%` and `\_` are literals."""
+    out, i = [], 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\" and i + 1 < len(pattern):
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
+            continue
+        out.append(".*" if ch == "%" else "." if ch == "_" else re.escape(ch))
+        i += 1
+    return re.compile("".join(out), re.IGNORECASE | re.DOTALL)
+
+
+class UniqueViolation(Exception):
+    """Carries the same message fragment as postgrest's APIError for code 23505."""
 
 
 class _Result:
@@ -68,6 +87,26 @@ class _Query:
         self._filters.append(("is", column, value))
         return self
 
+    def neq(self, column: str, value: Any) -> "_Query":
+        self._filters.append(("neq", column, value))
+        return self
+
+    def in_(self, column: str, values: Any) -> "_Query":
+        self._filters.append(("in", column, list(values)))
+        return self
+
+    def gte(self, column: str, value: Any) -> "_Query":
+        self._filters.append(("gte", column, value))
+        return self
+
+    def lt(self, column: str, value: Any) -> "_Query":
+        self._filters.append(("lt", column, value))
+        return self
+
+    def ilike(self, column: str, pattern: str) -> "_Query":
+        self._filters.append(("ilike", column, _like_regex(pattern)))
+        return self
+
     def order(self, column: str, desc: bool = False) -> "_Query":
         self._order = (column, desc)
         return self
@@ -86,6 +125,20 @@ class _Query:
                 wanted_null = value in (None, "null", "NULL")
                 if wanted_null != (row.get(column) is None):
                     return False
+            elif kind == "neq":
+                if row.get(column) == value:
+                    return False
+            elif kind == "in":
+                if row.get(column) not in value:
+                    return False
+            elif kind in ("gte", "lt"):
+                # Postgres drops NULLs from range comparisons; so do we.
+                cell = row.get(column)
+                if cell is None or (cell < value if kind == "gte" else cell >= value):
+                    return False
+            elif kind == "ilike":
+                if not value.fullmatch(str(row.get(column) or "")):
+                    return False
         return True
 
     def execute(self) -> _Result:
@@ -93,6 +146,8 @@ class _Query:
 
         if self._op == "insert":
             payloads = self._payload if isinstance(self._payload, list) else [self._payload]
+            for payload in payloads:
+                self._store._check_unique(self._table, payload, rows)
             inserted = []
             for payload in payloads:
                 row = dict(payload)
@@ -129,8 +184,22 @@ class FakeSupabase:
         "events": ("created_at",),
     }
 
+    # Unique constraints from 0001_init.sql that handlers must survive colliding with.
+    unique: dict[str, list[tuple[str, ...]]] = {
+        "experiments": [("experiment_code",)],
+        "samples": [("experiment_id", "sample_code")],
+    }
+
     def __init__(self) -> None:
         self.tables: dict[str, list[dict[str, Any]]] = {}
+
+    def _check_unique(self, table: str, payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
+        for columns in self.unique.get(table, []):
+            key = tuple(payload.get(c) for c in columns)
+            if any(tuple(r.get(c) for c in columns) == key for r in rows):
+                raise UniqueViolation(
+                    f'duplicate key value violates unique constraint "{table}_{"_".join(columns)}_key"'
+                )
 
     def table(self, name: str) -> _Query:
         return _Query(self, name)

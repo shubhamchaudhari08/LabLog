@@ -114,3 +114,15 @@ Do not remove, rewrite or regress any of these. Extend them only.
 | C-6 | Voice-created experiments would have **no samples**, and nothing can record against them. The Phase F DoD also needs a sample to be added mid-session. | Give `create_experiment` optional `sample_codes`, and add `POST /experiments/{id}/samples` (UI). No new tool. | No |
 | C-7 | Plan B routes live under `web/app/dashboard/`. The real routes are `(app)/dashboard`, `/experiments` and `/protocols`. | Adapt the plan to the code. Detail goes at `/experiments/[id]` (read-only). The workspace stays at `/dashboard/experiments/[id]`. | No |
 | C-8 | Plan A names `ReliabilityDashboard.tsx`, which does not exist. | Extend `(app)/reliability/page.tsx`. | No |
+
+---
+
+## Baseline (T002): 2026-09-25, commit `a90b0c9`
+
+| Suite | Command | Result |
+|---|---|---|
+| API | `cd api && .venv/Scripts/python -m pytest -q` | **119 passed** |
+| Web unit | `cd web && npm test` | **10 passed** (1 file) |
+| Web build | `cd web && npm run build` | **OK**, 13 routes |
+
+Note: run the API tests with the project venv (`api/.venv`). The system Python lacks `python-dotenv`, and `tests/test_eval.py` fails to collect without it.
