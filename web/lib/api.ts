@@ -132,3 +132,64 @@ export async function createProtocol(draft: ProtocolDraft): Promise<CreateProtoc
   if (!response.ok) throw new Error(`The protocol wasn't saved (${response.status}).`);
   return response.json();
 }
+
+// ---------------------------------------------------------------------------
+// Quick create / start (specs/003-post-mvp-features FR-214, contracts/http-api.md).
+// Same envelope as /protocols: HTTP 200 with success:false for a refused request.
+// ---------------------------------------------------------------------------
+
+export interface ExperimentDraft {
+  name: string;
+  description?: string;
+  protocol_id?: string;
+  sample_codes: string[];
+  start: boolean;
+}
+
+export interface CreatedExperiment {
+  id: string;
+  experiment_code: string;
+  name: string;
+  status: string;
+}
+
+type Refusal = { success: false; error: string; message: string; detail?: Record<string, unknown> };
+
+export type CreateExperimentResult =
+  | { success: true; experiment: CreatedExperiment; samples: { sample_code: string }[] }
+  | Refusal;
+
+export type StartExperimentResult = { success: true; experiment: CreatedExperiment } | Refusal;
+
+async function postJson<T>(path: string, body: unknown, what: string): Promise<T | Refusal> {
+  let response: Response;
+  try {
+    response = await fetch(`${env.apiUrl}${path}`, {
+      method: 'POST',
+      headers: await authHeaders(),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(`Couldn't reach the LabLog API, so the ${what}.`);
+  }
+  if (response.status === 401) {
+    return { success: false, error: 'UNAUTHENTICATED', message: 'Your session expired. Sign in again.' };
+  }
+  if (response.status === 403) {
+    return { success: false, error: 'FORBIDDEN', message: 'This experiment belongs to another account.' };
+  }
+  if (!response.ok) throw new Error(`The ${what} (${response.status}).`);
+  return response.json();
+}
+
+export function createExperiment(draft: ExperimentDraft): Promise<CreateExperimentResult> {
+  return postJson('/experiments', draft, "experiment wasn't created") as Promise<CreateExperimentResult>;
+}
+
+export function startExperiment(experimentId: string): Promise<StartExperimentResult> {
+  return postJson(
+    `/experiments/${encodeURIComponent(experimentId)}/start`,
+    undefined,
+    "experiment wasn't started",
+  ) as Promise<StartExperimentResult>;
+}

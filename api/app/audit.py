@@ -20,6 +20,11 @@ EventType = Literal[
     "PROTOCOL_STEP_COMPLETED",
     "EXPERIMENT_COMPLETED",
     "PROTOCOL_CREATED",
+    # specs/003-post-mvp-features data-model §3
+    "EXPERIMENT_CREATED",
+    "PROTOCOL_ASSOCIATED",
+    "EXPERIMENT_STARTED",
+    "SAMPLE_CREATED",
 ]
 
 

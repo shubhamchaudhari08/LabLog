@@ -50,6 +50,7 @@ The scientist lands on Home and sees counts for this week, running, completed, w
 2. **Given** History, **When** the user filters by status, protocol and date range and sorts by date, **Then** the rows match those filters.
 3. **Given** a COMPLETED experiment, **When** opened from History, **Then** Detail renders read-only (no VoiceDock, no mutation controls) using the same panels as the workspace.
 4. **Given** a RUNNING experiment, **When** opened from History, **Then** the user reaches the live workspace, which is unchanged.
+5. **Given** no RUNNING experiment, **When** Home loads, **Then** it offers **New experiment**. Submitting a name, protocol STAB and samples A1, A2 opens the workspace of a RUNNING `STAB-<n>` with two samples, where the mic starts a voice session.
 
 ---
 
@@ -136,6 +137,7 @@ Mid-run, the scientist adds sample B3 from the workspace. Within one turn the ag
 - **FR-211**: History MUST list code, name, protocol, date, status and deviation count. It MUST filter by status, protocol and date range, and sort by date and code.
 - **FR-212**: A read-only Detail view MUST reuse the workspace panels in a mode that renders no voice or mutation controls.
 - **FR-213**: The existing workspace, Protocols screens and Settings MUST be unchanged in behaviour.
+- **FR-214**: Home and Experiments MUST offer a quick **create/resume** path, as source plan Phase B requires ("quick create/resume experiment"). It is a form taking a name, an optional protocol and sample codes. It creates the experiment and, when a protocol is chosen, starts it, then opens the workspace where voice runs. A READY experiment's workspace MUST offer **Start**. This is a UI write route like 002's `POST /protocols`, and it adds no voice tool, so it does not depend on amendment A-1. *(Added 2026-09-25: with no RUNNING experiment in the database, the app had no path to a voice session.)*
 
 **Phase C: Voice lifecycle**
 - **FR-220**: `create_experiment` MUST generate the experiment code on the server, create DRAFT (READY if a protocol resolves), accept optional sample codes, require confirmation, and audit `EXPERIMENT_CREATED`, plus `SAMPLE_CREATED` per sample.

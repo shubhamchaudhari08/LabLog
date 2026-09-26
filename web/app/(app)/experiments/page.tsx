@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 import { usePageCrumbs } from '@/components/shell/AppShell';
 import { ExperimentListSkeleton } from '@/components/workspace/ExperimentList';
 import { StatusBadge } from '@/components/workspace/StatusBadge';
+import { IconPlus } from '@/components/icons';
 import { useExperimentList, useProtocolList } from '@/lib/queries/useExperiment';
 import { experimentHref, filterAndSortExperiments, runDate, type HistorySort } from '@/lib/history';
 
@@ -77,11 +78,17 @@ export default function ExperimentsPage() {
 
   return (
     <main id="main" className="page">
-      <header className="animate-rise">
-        <h1 className="page-title">Experiments</h1>
-        <p className="mt-xs max-w-[56ch] text-body-md text-muted">
-          Every run and the protocol behind it. Finished runs open as a record; running ones open at the bench.
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-md animate-rise">
+        <div>
+          <h1 className="page-title">Experiments</h1>
+          <p className="mt-xs max-w-[56ch] text-body-md text-muted">
+            Every run and the protocol behind it. Finished runs open as a record; running ones open at the bench.
+          </p>
+        </div>
+        <Link href="/experiments/new" className="btn-primary">
+          <IconPlus className="h-4 w-4" />
+          New experiment
+        </Link>
       </header>
 
       <div className="mt-xl flex flex-wrap items-center gap-md">

@@ -181,6 +181,8 @@ class FakeSupabase:
         "measurements": ("recorded_at",),
         "observations": ("recorded_at",),
         "deviations": ("created_at",),
+        "experiments": ("created_at",),
+        "samples": ("created_at",),
         "events": ("created_at",),
     }
 

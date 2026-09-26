@@ -120,6 +120,24 @@
 
 **Checkpoint**: The product reads as multi-page. **This is the Sep 30 submission cut.**
 
+### US2 extension: quick create & start (FR-214, added 2026-09-25)
+
+**Why**: With every experiment COMPLETED, the app had no path to a voice session. Voice lives in the workspace and records only into a RUNNING experiment, and nothing could create or start one. This follows the source plan's Phase B "quick create/resume". It adds UI write routes only, **no voice tool**, so it is not gated by A-1.
+
+- [X] T074 [P] [US2] Write the tests first in `api/tests/test_experiments.py`, covering `POST /experiments` and `POST /experiments/{id}/start` per contracts/http-api.md:
+  - create with a protocol and `start:true` gives RUNNING, code `STAB-105` against the seeded store (which holds STAB-104), 2 samples, and 4 events (`EXPERIMENT_CREATED`, 2× `SAMPLE_CREATED`, `EXPERIMENT_STARTED`)
+  - create with no protocol gives DRAFT with code `EXP-1`
+  - body `owner_id`, `status`, `experiment_code` and `started_at` are ignored
+  - the rejections: `INVALID_ARGS` (blank name), `PROTOCOL_NOT_FOUND` (another user's protocol), `INVALID_SAMPLE_CODE`, `DUPLICATE_SAMPLE_CODE`, and `NO_PROTOCOL` (start without a protocol). Each asserts that the `experiments`, `samples` and `events` counts are unchanged.
+  - a code collision retries
+  - start: READY→RUNNING with `EXPERIMENT_STARTED`; `INVALID_STATE` on RUNNING; `NO_PROTOCOL`; 403 for another user; 404 for a missing experiment; 401 with no token
+- [X] T075 [P] [US2] Create `api/app/samples.py` (the T039 content, pulled forward): `normalize_sample_code()`, `validate_sample_codes()` and `add_samples()`.
+- [X] T076 [US2] Create `api/app/lifecycle.py` with `next_experiment_code(sb, prefix)`, `create_experiment(sb, *, user_id, name, description, protocol, sample_codes, session_id, source)` and `start_experiment(sb, *, experiment, user_id, session_id)`. These are pure functions over `sb`, with validation done by the callers. US3's voice tools (T040) must wrap these, never duplicate them. Add the four new event types to `api/app/audit.py` (T025).
+- [X] T077 [US2] Create `api/app/routers/experiments.py` with `POST /experiments` and `POST /experiments/{id}/start`, and include it in `api/app/main.py`. Make T074 pass.
+- [X] T078 [US2] Add `createExperiment()` and `startExperiment()` to `web/lib/api.ts`. Add the `web/app/(app)/experiments/new/page.tsx` form: name, protocol select (readable protocols, plus "None, dictate it by voice"), sample codes (comma or space separated), and description. It offers "Create and start" when a protocol is chosen and "Create draft" otherwise. On success it invalidates `['experiments']` and routes to `/dashboard/experiments/<id>`.
+- [X] T079 [US2] *(The workspace hint sits in the header, as a StartBar beside the stats, rather than above the dock, so it is visible without scrolling.)* Add entry points. On Home: a **New experiment** button in the header, and a start card in the hero slot when nothing is running. On Experiments: a **New experiment** button. On the workspace: a **Start experiment** button in the header when the status is READY, and a one-line hint above the voice dock when the status is not RUNNING ("Voice records into running experiments. Start this one, or create a new one."). The existing layout is otherwise unchanged.
+- [ ] T080 [US2] *(Partial, 2026-09-25: 154 API and 30 web tests pass, and the build is clean. `next_experiment_code` was checked read-only against the live DB (next is STAB-105). No live POST was made, to avoid writing to your DB unasked. **Browser walkthrough pending.**)* Validate: run the regression gate, run the build, and exercise the new endpoints against the live API with a real user token if available. Then commit.
+
 ---
 
 ## Phase 5: Foundational for voice stories (⛔ gated by amendment A-1)

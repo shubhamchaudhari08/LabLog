@@ -11,7 +11,9 @@
  * words being spoken and the values they produce are in one line of sight.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 
 import { usePageCrumbs } from '@/components/shell/AppShell';
@@ -22,7 +24,8 @@ import { SampleBoard } from '@/components/workspace/SampleBoard';
 import { Ledger, toEntries } from '@/components/workspace/Ledger';
 import { ExperimentTimeline } from '@/components/workspace/Timeline';
 import { StatusBadge } from '@/components/workspace/StatusBadge';
-import { IconProtocol } from '@/components/icons';
+import { IconMic, IconProtocol } from '@/components/icons';
+import { startExperiment } from '@/lib/api';
 import {
   useDeviations,
   useEvents,
@@ -31,6 +34,7 @@ import {
   useObservations,
   useRealtimeExperiment,
   useSamples,
+  keys,
   type ProtocolStep,
 } from '@/lib/queries/useExperiment';
 
@@ -104,6 +108,68 @@ function ProtocolRail({
         />
       </div>
     </section>
+  );
+}
+
+/**
+ * Voice records only into a RUNNING experiment (the dispatcher refuses the rest).
+ * A READY run gets its Start here; anything else gets one line saying why the
+ * microphone would have nothing to write to (specs/003-post-mvp-features FR-214).
+ */
+function StartBar({ experimentId, status, hasProtocol }: { experimentId: string; status: string; hasProtocol: boolean }) {
+  const client = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (status === 'RUNNING') return null;
+
+  async function start() {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await startExperiment(experimentId);
+      if (!result.success) setError(result.message);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: keys.experiment(experimentId) }),
+        client.invalidateQueries({ queryKey: ['experiments'] }),
+        client.invalidateQueries({ queryKey: keys.events(experimentId) }),
+      ]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The experiment was not started.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const message =
+    status === 'READY'
+      ? 'Ready to run. Start it, then press the microphone to record by voice.'
+      : status === 'DRAFT'
+        ? hasProtocol
+          ? 'This experiment is a draft.'
+          : 'No protocol yet. Press the microphone and say "create a new protocol and start this experiment", then dictate the steps.'
+        : 'This run is finished, so voice has nothing to record into.';
+
+  return (
+    <div className="mt-md flex flex-wrap items-center gap-sm rounded-lg border border-hairline bg-surface-soft px-md py-sm text-body-sm">
+      <IconMic className="h-4 w-4 shrink-0 text-primary" />
+      <span className="min-w-0 flex-1 text-body">{message}</span>
+      {status === 'READY' && (
+        <button type="button" className="btn-primary" onClick={start} disabled={busy}>
+          {busy ? 'Starting…' : 'Start experiment'}
+        </button>
+      )}
+      {(status === 'COMPLETED' || status === 'CANCELLED') && (
+        <Link href="/experiments/new" className="btn-secondary">
+          New experiment
+        </Link>
+      )}
+      {error && (
+        <p role="alert" className="w-full text-caption text-error">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -216,6 +282,9 @@ export default function ExperimentWorkspace() {
               }
             />
           </dl>
+          {experiment.data && (
+            <StartBar experimentId={experimentId} status={status} hasProtocol={Boolean(experiment.data.protocol_id)} />
+          )}
         </header>
 
         {/* below xl the protocol rail joins the flow, just under the header */}

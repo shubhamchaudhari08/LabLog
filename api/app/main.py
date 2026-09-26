@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import health, protocols, settings, tools, voice
+from .routers import experiments, health, protocols, settings, tools, voice
 
 load_dotenv()
 
@@ -38,3 +38,4 @@ app.include_router(voice.router)
 app.include_router(tools.router)
 app.include_router(settings.router)
 app.include_router(protocols.router)
+app.include_router(experiments.router)

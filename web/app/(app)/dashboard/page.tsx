@@ -13,7 +13,7 @@ import Link from 'next/link';
 import { usePageCrumbs, useCurrentUser } from '@/components/shell/AppShell';
 import { ExperimentListSkeleton, ExperimentRow } from '@/components/workspace/ExperimentList';
 import { StatusBadge } from '@/components/workspace/StatusBadge';
-import { IconArrow, IconMic, IconProtocol } from '@/components/icons';
+import { IconArrow, IconMic, IconPlus, IconProtocol } from '@/components/icons';
 import { useExperimentList, useHomeCounts, useProtocolList, type ExperimentSummary } from '@/lib/queries/useExperiment';
 import { computeHomeStats } from '@/lib/stats';
 
@@ -99,6 +99,38 @@ function RunningHero({ experiment }: { experiment: ExperimentSummary }) {
   );
 }
 
+/** In the hero slot when nothing is running: voice needs a RUNNING experiment to record into. */
+function StartCard() {
+  return (
+    <Link
+      href="/experiments/new"
+      className="panel-dark group relative block animate-slide-up overflow-hidden rounded-xl p-lg transition-transform duration-300 hover:-translate-y-[2px] sm:p-xl"
+    >
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-pill bg-primary/20 blur-3xl"
+      />
+      <div className="relative flex flex-wrap items-center gap-x-xl gap-y-lg">
+        <span className="grid h-[88px] w-[88px] shrink-0 place-items-center rounded-pill border border-white/10 text-primary">
+          <IconMic className="h-8 w-8" />
+        </span>
+        <div className="min-w-[min(100%,260px)] flex-1">
+          <h2 className="text-display-sm text-on-dark">Start an experiment</h2>
+          <p className="mt-xs text-body-sm text-on-dark-soft">
+            Name it, pick a protocol and list the samples. It opens at the bench, and the microphone records every
+            reading you say.
+          </p>
+        </div>
+        <span className="btn-primary pointer-events-none">
+          <IconPlus className="h-4 w-4" />
+          New experiment
+          <IconArrow className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-[3px]" />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
 function Tile({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
     <div className="card animate-rise p-lg">
@@ -135,15 +167,21 @@ export default function Overview() {
         <p className="mt-xs max-w-[56ch] text-body-md text-muted">
           {running
             ? `${running.experiment_code} is running. Pick up where you left off, or review the runs behind it.`
-            : 'No experiment is running. Open one below to review it.'}
+            : 'No experiment is running. Start one to record by voice, or open a finished run below to review it.'}
         </p>
+        <Link href="/experiments/new" className="btn-secondary mt-md inline-flex">
+          <IconPlus className="h-4 w-4" />
+          New experiment
+        </Link>
       </header>
 
       <div className="mt-xl">
         {experiments.isLoading ? (
           <div className="skeleton h-[168px] rounded-xl" />
+        ) : running ? (
+          <RunningHero experiment={running} />
         ) : (
-          running && <RunningHero experiment={running} />
+          <StartCard />
         )}
       </div>
 
