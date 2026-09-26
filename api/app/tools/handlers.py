@@ -856,3 +856,10 @@ def complete_experiment(
         summary=summary,
     )
 
+
+
+# ---------------------------------------------------------------------------
+# Desk profile (specs/003-post-mvp-features, amendment A-1). Defined in
+# lifecycle.py; exported here because the dispatcher looks handlers up by name.
+# ---------------------------------------------------------------------------
+from .lifecycle import create_experiment, list_protocols, start_experiment  # noqa: E402,F401

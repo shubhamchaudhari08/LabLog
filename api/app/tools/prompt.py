@@ -51,16 +51,91 @@ def build_keyterms(ctx: ExperimentContext) -> list[str]:
 
 
 def build_greeting(ctx: ExperimentContext) -> str:
-    """Spoken verbatim, not processed by the model, immutable after session.ready."""
+    """Spoken verbatim, not processed by the model, immutable after session.ready.
+
+    Leads with the experiment's NAME. Codes are derived from the protocol code
+    (STAB-105), so "Experiment STAB-105" alone sounds like the protocol.
+    """
     experiment = ctx.experiment
+    title = f"{experiment['name']}, {experiment['experiment_code']}"
     step = ctx.current_step
-    if step:
+    if step and experiment["status"] == "RUNNING":
         steps = (ctx.protocol or {}).get("steps") or []
         return (
-            f"LabLog ready. Experiment {experiment['experiment_code']} is running, "
-            f"step {step['index'] + 1} of {len(steps)}: {step['name']}."
+            f"LabLog ready. {title}, is running. "
+            f"Step {step['index'] + 1} of {len(steps)}: {step['name']}."
         )
-    return f"LabLog ready. Experiment {experiment['experiment_code']} is {experiment['status'].lower()}."
+    return f"LabLog ready. {title}, is {experiment['status'].lower()}."
+
+
+DESK_GREETING = "LabLog ready. No experiment is open. Tell me which experiment to create or start."
+
+
+def build_desk_keyterms(protocols: list[dict[str, Any]], experiments: list[dict[str, Any]]) -> list[str]:
+    """Protocol and open-experiment codes lead: they are what the user will name."""
+    terms: list[str] = []
+    for term in (
+        [p.get("protocol_code") for p in protocols]
+        + [e.get("experiment_code") for e in experiments]
+        + [p.get("name") for p in protocols]
+        + vocabulary.spoken_terms()
+        + ["experiment", "protocol", "sample"]
+    ):
+        if term and term not in terms:
+            terms.append(term)
+    return terms[:KEYTERM_LIMIT]
+
+
+def build_desk_prompt(protocols: list[dict[str, Any]], experiments: list[dict[str, Any]]) -> str:
+    """No experiment is open: the session can create, start or resume one — nothing else."""
+    listed = "\n".join(
+        f"  - {p.get('protocol_code')}: {p.get('name')} {p.get('version') or ''} "
+        f"({len(p.get('steps') or [])} steps)"
+        for p in protocols[:20]
+    ) or "  (none)"
+    open_runs = "\n".join(
+        f"  - {e.get('experiment_code')}: {e.get('name')} ({str(e.get('status')).lower()})"
+        for e in experiments[:10]
+    ) or "  (none)"
+
+    return f"""\
+You are LabLog, a laboratory documentation and workflow assistant. You are
+laboratory software, not a chatbot and not customer support.
+
+CONTEXT
+- No experiment is open yet. You can create a new experiment and start it, or
+  start or resume one that already exists. Nothing can be recorded until an
+  experiment is running; once it is, this session switches to it automatically.
+- Protocols the user can run:
+{listed}
+- The user's experiments that are not finished:
+{open_runs}
+
+HOW TO CREATE AN EXPERIMENT
+1. You need a name. Ask for it if the user did not give one.
+2. You need the protocol. If the user did not say which, ask, offering the
+   protocols above by name. Pass the protocol's CODE as protocol_ref.
+3. Ask which samples the run has (for example "A17, A18 and CONTROL-01") unless
+   the user already listed them or says there are none yet.
+4. Call create_experiment with confirmed false. Read back the summary it returns
+   in one sentence and ask "Shall I create it?".
+5. Only after the user says yes, call create_experiment again with confirmed true.
+   Then say the experiment code the tool returned. Never invent a code.
+
+HOW TO START OR RESUME ONE
+- Call start_experiment with the experiment's code. If the tool says it needs
+  confirmation, ask, and call again with confirmed true only after a yes.
+
+HARD RULES
+- Never create or start anything without an explicit yes from the user.
+- Never invent a protocol, a step, a sample or a code. Use only what the tools return.
+- If a tool returns an error, relay it helpfully and offer the alternatives it gives.
+- If the user tries to record a reading now, tell them to create or start an
+  experiment first.
+
+STYLE
+One or two short sentences. The user's hands are busy.
+"""
 
 
 def build_prompt(ctx: ExperimentContext) -> str:

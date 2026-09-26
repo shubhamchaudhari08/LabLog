@@ -16,8 +16,16 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..db import get_experiment_context
 from ..deps import User, get_current_user, supabase_admin
-from ..tools.prompt import build_greeting, build_keyterms, build_prompt
-from ..tools.schemas import TOOL_SCHEMAS
+from ..resolve import readable_protocols
+from ..tools.prompt import (
+    DESK_GREETING,
+    build_desk_keyterms,
+    build_desk_prompt,
+    build_greeting,
+    build_keyterms,
+    build_prompt,
+)
+from ..tools.schemas import tool_schemas
 
 router = APIRouter(prefix="/voice")
 
@@ -57,20 +65,74 @@ async def _mint_token() -> str:
     return token
 
 
+# A finished run has nothing left to record into; opening a microphone on it
+# only invites writes the dispatcher would refuse.
+CLOSED = {"COMPLETED", "CANCELLED"}
+
+
+def _session_config(system_prompt: str, greeting: str, keyterms: list[str], tools: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "system_prompt": system_prompt,
+        "greeting": greeting,
+        "input": {
+            "format": {"encoding": "audio/pcm"},
+            "keyterms": keyterms,
+            "turn_detection": {
+                "vad_threshold": 0.5,
+                "min_silence": 1000,
+                "max_silence": 3000,
+                "interrupt_response": True,
+            },
+        },
+        "output": {
+            "format": {"encoding": "audio/pcm"},
+            "voice": VOICE,
+            "volume": 80,
+        },
+        "tools": tools,
+    }
+
+
 @router.get("/bootstrap")
-async def bootstrap(experiment_id: str, user: User = Depends(get_current_user)) -> dict[str, Any]:
+async def bootstrap(experiment_id: str | None = None, user: User = Depends(get_current_user)) -> dict[str, Any]:
     sb = supabase_admin()
+
+    if not experiment_id:
+        # Desk profile: no experiment open. The session can only create, start or
+        # resume one (constitution amendment A-1). Reads are scoped to this user.
+        protocols = readable_protocols(sb, user.id)
+        open_runs = [
+            e
+            for e in (sb.table("experiments").select("*").eq("owner_id", user.id).execute().data or [])
+            if e.get("status") not in CLOSED
+        ]
+        token = await _mint_token()
+        return {
+            "token": token,
+            "ws_url": WS_URL,
+            "profile": "desk",
+            "experiment": None,
+            "session_config": _session_config(
+                build_desk_prompt(protocols, open_runs),
+                DESK_GREETING,
+                build_desk_keyterms(protocols, open_runs),
+                tool_schemas("desk"),
+            ),
+        }
 
     # Authorize BEFORE minting. Minting first would let any authenticated user
     # burn quota against experiments they cannot see.
     ctx = get_experiment_context(sb, experiment_id, user.id)
+    experiment = ctx.experiment
+    if experiment.get("status") in CLOSED:
+        raise HTTPException(status_code=409, detail="EXPERIMENT_CLOSED")
 
     token = await _mint_token()
-    experiment = ctx.experiment
 
     return {
         "token": token,
         "ws_url": WS_URL,
+        "profile": "bench",
         "experiment": {
             "id": experiment["id"],
             "code": experiment["experiment_code"],
@@ -78,24 +140,7 @@ async def bootstrap(experiment_id: str, user: User = Depends(get_current_user)) 
             "status": experiment["status"],
             "current_step_index": experiment.get("current_step_index", 0),
         },
-        "session_config": {
-            "system_prompt": build_prompt(ctx),
-            "greeting": build_greeting(ctx),
-            "input": {
-                "format": {"encoding": "audio/pcm"},
-                "keyterms": build_keyterms(ctx),
-                "turn_detection": {
-                    "vad_threshold": 0.5,
-                    "min_silence": 1000,
-                    "max_silence": 3000,
-                    "interrupt_response": True,
-                },
-            },
-            "output": {
-                "format": {"encoding": "audio/pcm"},
-                "voice": VOICE,
-                "volume": 80,
-            },
-            "tools": TOOL_SCHEMAS,
-        },
+        "session_config": _session_config(
+            build_prompt(ctx), build_greeting(ctx), build_keyterms(ctx), tool_schemas("bench")
+        ),
     }

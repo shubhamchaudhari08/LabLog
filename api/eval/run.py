@@ -25,9 +25,10 @@ from pydantic import ValidationError
 
 from app.db import ExperimentContext
 from app.tools import handlers
-from app.tools.models import MUTATING_TOOLS, TOOL_REGISTRY
-from app.tools.prompt import build_prompt
-from app.tools.schemas import TOOL_SCHEMAS
+from app.resolve import readable_protocols, resolve_experiment
+from app.tools.models import MUTATING_TOOLS, TOOL_REGISTRY, TOOL_SCOPE
+from app.tools.prompt import build_desk_prompt, build_prompt
+from app.tools.schemas import TOOL_SCHEMAS, tool_schemas
 from tests.conftest import OWNER_ID, seeded_store
 
 from .scenarios import SCENARIOS
@@ -35,10 +36,11 @@ from .scenarios import SCENARIOS
 GATEWAY = "https://llm-gateway.assemblyai.com/v1/chat/completions"
 # The gateway takes OpenAI-nested tool schemas; the voice agent takes flat ones.
 
-GATEWAY_TOOLS = [
-    {"type": "function", "function": {k: s[k] for k in ("name", "description", "parameters")}}
-    for s in TOOL_SCHEMAS
-]
+def gateway_tools(schemas):
+    return [{"type": "function", "function": {k: s[k] for k in ("name", "description", "parameters")}} for s in schemas]
+
+
+GATEWAY_TOOLS = gateway_tools(TOOL_SCHEMAS)
 OPENING = [
     {"role": "user", "content": "Start experiment STAB-104."},
     {"role": "assistant", "content": "STAB-104 is running. Step 2 of 6: record initial temperature."},
@@ -59,25 +61,43 @@ def execute(sb, experiment, name, args):
         parsed = TOOL_REGISTRY[name][0](**args)
     except ValidationError:
         return {"success": False, "error": "INVALID_ARGS"}
+    # Same scope routing as the dispatcher (app/routers/tools.py step 4).
+    scope = TOOL_SCOPE[name]
+    if scope == "experiment" and experiment is None:
+        return {"success": False, "error": "EXPERIMENT_REQUIRED"}
+    if scope == "experiment_ref":
+        found = resolve_experiment(sb, OWNER_ID, parsed.experiment_ref)
+        if "error" in found:
+            return {"success": False, "error": found["error"], "message": found["message"], "detail": found["detail"]}
+        experiment = found["experiment"]
+    if scope == "user":
+        experiment = None
     return getattr(handlers, name)(sb=sb, experiment=experiment, user_id=OWNER_ID, args=parsed, session_id="eval")
 
 
+def session_for(sb, profile):
+    """(experiment, system prompt, gateway tools, opening turns) for a scenario's profile."""
+    if profile == "desk":
+        open_runs = [e for e in sb.rows("experiments") if e.get("status") not in ("COMPLETED", "CANCELLED")]
+        prompt = build_desk_prompt(readable_protocols(sb, OWNER_ID), open_runs)
+        return None, prompt, gateway_tools(tool_schemas("desk")), []
+    experiment = sb.rows("experiments")[0]
+    ctx = ExperimentContext(experiment=experiment, protocol=sb.rows("protocols")[0], samples=sb.rows("samples"))
+    return experiment, build_prompt(ctx), GATEWAY_TOOLS, OPENING
+
+
 def converse(model, key, scenario):
-    profile = scenario.get("profile", "bench")
-    if profile != "bench":
-        raise ValueError(f"profile {profile!r} is not supported yet")  # desk/setup land with T032
     # ponytail: in-memory store driven by the real handlers — measures the
     # validation layer, not Postgres. Point at a disposable Supabase experiment
     # if database-level behaviour ever needs measuring too.
     sb = seeded_store()
-    experiment = sb.rows("experiments")[0]
+    experiment, prompt, tools, opening = session_for(sb, scenario.get("profile", "bench"))
     for name, args in scenario.get("setup", []):
         execute(sb, experiment, name, args)
 
-    ctx = ExperimentContext(experiment=experiment, protocol=sb.rows("protocols")[0], samples=sb.rows("samples"))
     messages = [
-        {"role": "system", "content": build_prompt(ctx)},
-        *OPENING,
+        {"role": "system", "content": prompt},
+        *opening,
         *scenario.get("history", []),
         {"role": "user", "content": scenario["utterance"]},
     ]
@@ -87,7 +107,7 @@ def converse(model, key, scenario):
         response = httpx.post(
             GATEWAY,
             headers={"Authorization": key},  # raw key, not Bearer
-            json={"model": model, "messages": messages, "tools": GATEWAY_TOOLS},
+            json={"model": model, "messages": messages, "tools": tools},
             timeout=90,
         )
         if response.is_error:
@@ -179,7 +199,9 @@ def score(scenario, calls, text):
         lowered = text.lower()
         r["hallucination"] = not ("approved protocol" in lowered or "verify the laboratory procedure" in lowered)
     if expect.get("error"):
-        attempted = [result for name, _, result in calls if name == "record_measurement"]
+        attempted = [result for _, _, result in calls if not result.get("success")] or [
+            result for name, _, result in calls if name == "record_measurement"
+        ]
         r["backend_ok"] = any(x.get("error") == expect["error"] for x in attempted) if attempted else None
 
     r["passed"] = selected and r["args_ok"] is not False and not false_record and not r["hallucination"]

@@ -18,8 +18,9 @@ from pydantic import BaseModel, ValidationError
 
 from ..db import load_experiment
 from ..deps import User, get_current_user, supabase_admin
+from ..resolve import resolve_experiment
 from ..tools import handlers
-from ..tools.models import MUTATING_TOOLS, TOOL_REGISTRY
+from ..tools.models import MUTATING_TOOLS, TOOL_REGISTRY, TOOL_SCOPE
 
 router = APIRouter()
 
@@ -27,7 +28,10 @@ router = APIRouter()
 class ToolCall(BaseModel):
     tool: str
     args: dict[str, Any] = {}
-    experiment_id: str
+    # Optional since specs/003 (desk profile): a session with no experiment open
+    # can still create or start one. Tools that act on the bound experiment still
+    # require it (contracts/tools-api-v2.md).
+    experiment_id: str | None = None
     session_id: str | None = None
 
 
@@ -69,23 +73,36 @@ async def call_tool(body: ToolCall, user: User = Depends(get_current_user)) -> d
         )
 
     sb = supabase_admin()
+    scope = TOOL_SCOPE.get(body.tool, "experiment")
 
-    # 4. Load the experiment.
-    experiment = load_experiment(sb, body.experiment_id)
-    if experiment is None:
-        raise HTTPException(status_code=404, detail="EXPERIMENT_NOT_FOUND")
+    # 4. Find the experiment the tool acts on, by scope.
+    experiment: dict[str, Any] | None = None
+    if scope == "experiment":
+        if not body.experiment_id:
+            return _fail("EXPERIMENT_REQUIRED", "No experiment is open. Create or start one first.")
+        experiment = load_experiment(sb, body.experiment_id)
+        if experiment is None:
+            raise HTTPException(status_code=404, detail="EXPERIMENT_NOT_FOUND")
+    elif scope == "experiment_ref":
+        # 4a. Resolved among the caller's OWN experiments only, so another user's
+        #     code reads as not found rather than confirming it exists.
+        found = resolve_experiment(sb, user.id, args.experiment_ref)
+        if "error" in found:
+            return _fail(found["error"], found["message"], **found["detail"])
+        experiment = found["experiment"]
+    # scope == "user": no experiment; the handler filters every query by owner.
 
     # 5. Explicit ownership check — ONCE, here, before dispatch.
     #
     #    The service role key bypasses row-level security by design, so Postgres
     #    enforces nothing on this path. This line is the only control. It lives
-    #    in the dispatcher rather than in each of the ten handlers, because
-    #    there one omission is one vulnerability (research.md R-006).
-    if experiment.get("owner_id") != user.id:
+    #    in the dispatcher rather than in each handler, because there one
+    #    omission is one vulnerability (research.md R-006).
+    if experiment is not None and experiment.get("owner_id") != user.id:
         raise HTTPException(status_code=403, detail="FORBIDDEN")
 
     # 6. Mutating tools require a RUNNING experiment.
-    if body.tool in MUTATING_TOOLS and experiment.get("status") != "RUNNING":
+    if body.tool in MUTATING_TOOLS and experiment and experiment.get("status") != "RUNNING":
         return _fail(
             "EXPERIMENT_NOT_RUNNING",
             f"Experiment {experiment['experiment_code']} is "

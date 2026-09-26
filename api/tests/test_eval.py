@@ -165,3 +165,36 @@ def test_write_run_is_immutable_and_rebuilds_history(tmp_path):
 
     with pytest.raises(FileExistsError):
         write_run(first, runs, public)
+
+
+def test_desk_scenarios_run_under_the_desk_profile_without_the_network(monkeypatch):
+    """The harness hands a desk scenario the desk prompt and only the desk tools."""
+    import eval.run as run
+
+    seen = {}
+
+    class Reply:
+        is_error = False
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Which protocol should it use?"}}]}
+
+    def fake_post(url, headers, json, timeout):
+        seen["tools"] = [t["function"]["name"] for t in json["tools"]]
+        seen["system"] = json["messages"][0]["content"]
+        return Reply()
+
+    monkeypatch.setattr(run.httpx, "post", fake_post)
+    desk = next(s for s in SCENARIOS if s["id"] == "desk_01")
+    calls, text = run.converse("m", "k", desk)
+
+    assert seen["tools"] == ["list_protocols", "create_experiment", "start_experiment"]
+    assert "No experiment is open yet" in seen["system"]
+    assert calls == [] and score(desk, calls, text)["passed"]
+
+
+def test_desk_execute_routes_by_scope():
+    sb = seeded_store()
+    resumed = execute(sb, None, "start_experiment", {"experiment_ref": "STAB-104", "confirmed": False})
+    assert resumed["success"] and resumed["data"]["already_running"] is True
+    assert execute(sb, None, "record_measurement", {"sample_code": "A17", "measurement_type": "temperature", "value": 4.2})["error"] == "EXPERIMENT_REQUIRED"

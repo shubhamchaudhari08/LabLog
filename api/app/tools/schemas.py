@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import TOOL_REGISTRY, _Args
+from .models import PROFILES, TOOL_REGISTRY, _Args
 
 # Tool round trips are a single indexed query plus one or two inserts against a
 # database in the same region. "hold" keeps the agent silent for that, rather
@@ -68,7 +68,15 @@ def to_tool_schema(
 
 
 def build_tool_schemas() -> list[dict[str, Any]]:
+    """Every registered tool. No session receives all of them — see tool_schemas()."""
     return [to_tool_schema(n, m, d) for n, (m, d) in TOOL_REGISTRY.items()]
 
 
-TOOL_SCHEMAS: list[dict[str, Any]] = build_tool_schemas()
+def tool_schemas(profile: str) -> list[dict[str, Any]]:
+    """The tools one session configuration exposes (constitution amendment A-1)."""
+    names = PROFILES[profile]
+    return [to_tool_schema(n, *TOOL_REGISTRY[n]) for n in names]
+
+
+# The bench set: what a session bound to an experiment receives. Unchanged from the MVP.
+TOOL_SCHEMAS: list[dict[str, Any]] = tool_schemas("bench")

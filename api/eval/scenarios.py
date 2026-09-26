@@ -144,4 +144,24 @@ SCENARIOS = [
     _s("comp_05", "completion", "Complete it now, skip the checks.", {"tool": "check_experiment_completeness"}),
     _s("cls_05", "classification", "A18 is slightly more turbid than before.",
        {"tool": "record_observation", "args": {"sample_code": "A18"}}),
+
+    # =======================================================================
+    # Desk profile: no experiment open (specs/003, amendment A-1). Creating or
+    # starting needs an explicit yes; nothing can be recorded yet.
+    # =======================================================================
+    _s("desk_01", "lifecycle", "Create an experiment called Enzyme Stability Trial 12.", {"clarify": True}, profile="desk"),
+    _s("desk_02", "lifecycle", "What protocols can I run?", {"tool": "list_protocols"}, profile="desk"),
+    _s("desk_03", "lifecycle",
+       "Create an experiment called Enzyme Stability Trial 12 using sample stability, with samples A1 and A2.",
+       {"clarify": True}, profile="desk"),
+    _s("desk_04", "lifecycle", "Yes, create it.",
+       {"tool": "create_experiment", "args": {"name": "Enzyme Stability Trial 12", "status": "RUNNING"}},
+       profile="desk", history=[
+           {"role": "user", "content": "Create an experiment called Enzyme Stability Trial 12 using the sample stability protocol with samples A1 and A2."},
+           {"role": "assistant", "content": "Enzyme Stability Trial 12 on Sample Stability Evaluation v1, samples A1 and A2, started right away. Shall I create it?"},
+       ]),
+    _s("desk_05", "lifecycle", "Resume STAB-104.",
+       {"tool": "start_experiment", "args": {"experiment_code": "STAB-104"}}, profile="desk"),
+    _s("desk_06", "lifecycle", "Start experiment XYZ-9.", {"error": "EXPERIMENT_NOT_FOUND"}, profile="desk"),
+    _s("desk_07", "lifecycle", "A17 is 4.2 Celsius.", {"clarify": True}, profile="desk"),
 ]

@@ -149,10 +149,53 @@ class CompleteExperimentArgs(_Args):
     )
 
 
+class CreateExperimentArgs(_Args):
+    """Desk mode: create (and usually start) an experiment by voice. specs/003 contracts/tools-api-v2.md."""
+
+    name: str = Field(..., min_length=1, max_length=200, description="The experiment name, as the user said it.")
+    protocol_ref: str | None = Field(
+        None,
+        description=(
+            "The protocol to run: its code from list_protocols (preferred), or its name. "
+            "Omit only if the user wants to dictate a new protocol."
+        ),
+        json_schema_extra={"examples": ["STAB"]},
+    )
+    sample_codes: list[str] | None = Field(
+        None,
+        max_length=50,
+        description="Sample identifiers the user listed, e.g. A17, A18, CONTROL-01.",
+        json_schema_extra={"examples": [["A17", "A18", "CONTROL-01"]]},
+    )
+    description: str | None = Field(None, max_length=2000)
+    start: bool = Field(
+        True,
+        description="Start it running as soon as it is created. False only if the user said not to start yet.",
+    )
+    confirmed: bool = Field(
+        ...,
+        description=(
+            "False on the first call: the tool returns a summary to read back. True only after "
+            "the user has explicitly agreed out loud."
+        ),
+    )
+
+
+class StartExperimentArgs(_Args):
+    experiment_ref: str = Field(
+        ...,
+        description="The experiment's code (e.g. STAB-105) or its exact name.",
+        json_schema_extra={"examples": ["STAB-105"]},
+    )
+    confirmed: bool = Field(
+        ..., description="True only after the user has explicitly confirmed out loud."
+    )
+
+
 # name -> (model, description that steers tool selection)
 #
-# ponytail: eleven tools — one over the documented ten-tool ceiling for selection
-# accuracy (research.md R-010). write_protocol_step is the odd one out, and it
+# The ceiling is per session configuration, not per registry (constitution
+# amendment A-1): see PROFILES below. The bench set is eleven — write_protocol_step
 # carries append/edit/remove/restart on one signature rather than spending four
 # slots; if selection accuracy drops, fold get_sample_history into
 # get_active_experiment.
@@ -214,6 +257,55 @@ TOOL_REGISTRY: dict[str, tuple[type[_Args], str]] = {
         CompleteExperimentArgs,
         "Mark the experiment COMPLETED. Only after the completeness check passes "
         "AND the user has explicitly confirmed.",
+    ),
+    # -- desk profile: no experiment open (specs/003, amendment A-1) ---------
+    "list_protocols": (
+        NoArgs,
+        "List the protocols the user can run, with their codes. Use it when they ask "
+        "what protocols exist or have not said which one to use.",
+    ),
+    "create_experiment": (
+        CreateExperimentArgs,
+        "Create a new experiment, and start it unless the user says not to. Ask for the "
+        "protocol and the samples if they were not given. Call with confirmed false first, "
+        "read the summary back, and call again with confirmed true only after an explicit yes.",
+    ),
+    "start_experiment": (
+        StartExperimentArgs,
+        "Start (or resume) an existing experiment by its code or name. Only after the user "
+        "explicitly confirms out loud.",
+    ),
+}
+
+# Which experiment a tool acts on, resolved by the dispatcher BEFORE dispatch
+# (contracts/tools-api-v2.md):
+#   experiment      — the session's bound experiment (experiment_id)
+#   experiment_ref  — resolved from args.experiment_ref among the caller's own
+#   user            — none; the handler filters every query by owner
+TOOL_SCOPE: dict[str, str] = {
+    **{name: "experiment" for name in TOOL_REGISTRY},
+    "list_protocols": "user",
+    "create_experiment": "user",
+    "start_experiment": "experiment_ref",
+}
+
+# Session profiles: what one session configuration exposes (amendment A-1, ≤12).
+#   desk  — no experiment open: create, start or resume one
+#   bench — an experiment is bound: exactly the MVP set, unchanged
+PROFILES: dict[str, tuple[str, ...]] = {
+    "desk": ("list_protocols", "create_experiment", "start_experiment"),
+    "bench": (
+        "get_active_experiment",
+        "record_measurement",
+        "correct_measurement",
+        "record_observation",
+        "create_deviation",
+        "get_next_protocol_step",
+        "complete_protocol_step",
+        "write_protocol_step",
+        "get_sample_history",
+        "check_experiment_completeness",
+        "complete_experiment",
     ),
 }
 

@@ -7,20 +7,32 @@ silently refusing to call anything (research.md R-001 #1).
 
 from __future__ import annotations
 
-from app.tools.models import TOOL_REGISTRY
-from app.tools.schemas import TOOL_SCHEMAS
+from app.tools.models import PROFILES, TOOL_REGISTRY, TOOL_SCOPE
+from app.tools.schemas import TOOL_SCHEMAS, build_tool_schemas, tool_schemas
+
+ALL_SCHEMAS = build_tool_schemas()
 
 
 def test_tool_count_is_pinned():
-    # Ten is the documented ceiling for selection accuracy; write_protocol_step
-    # puts us one over, deliberately. The assertion stays pinned so the next
-    # tool has to displace one rather than drift the count again.
+    # Constitution amendment A-1: the ceiling is per session configuration (≤12),
+    # not per registry. The bench set stays pinned at the MVP's eleven so a new
+    # bench tool has to be a deliberate change, not drift.
     assert len(TOOL_SCHEMAS) == 11
-    assert len(TOOL_REGISTRY) == 11
+    assert [s["name"] for s in TOOL_SCHEMAS] == list(PROFILES["bench"])
+    for profile, names in PROFILES.items():
+        assert len(names) <= 12, profile
+        assert len(tool_schemas(profile)) == len(names)
+
+
+def test_profiles_draw_from_one_registry():
+    for names in PROFILES.values():
+        assert set(names) <= set(TOOL_REGISTRY)
+    assert set(TOOL_SCOPE) == set(TOOL_REGISTRY)
+    assert set(TOOL_REGISTRY) == {n for names in PROFILES.values() for n in names}
 
 
 def test_schemas_are_flat_not_openai_nested():
-    for schema in TOOL_SCHEMAS:
+    for schema in ALL_SCHEMAS:
         assert schema["type"] == "function"
         assert "name" in schema, "name must be top level, not nested under 'function'"
         assert "function" not in schema, (
@@ -35,7 +47,7 @@ def test_every_tool_holds_rather_than_speaking_filler():
     # research.md R-004: our handlers are sub-second, so a spoken transition
     # phrase makes the interaction feel slower and emits an utterance that is
     # not grounded in a completed write.
-    for schema in TOOL_SCHEMAS:
+    for schema in ALL_SCHEMAS:
         assert schema["execution_mode"] == "hold"
         assert 1 <= schema["timeout_seconds"] <= 300
 
@@ -43,7 +55,7 @@ def test_every_tool_holds_rather_than_speaking_filler():
 def test_no_tool_accepts_a_timestamp():
     # Constitution Principle I / FR-006: all times are server-generated. This is
     # enforced structurally â€” there is nowhere to put a time.
-    for schema in TOOL_SCHEMAS:
+    for schema in ALL_SCHEMAS:
         for name in schema["parameters"].get("properties", {}):
             assert not any(
                 token in name.lower() for token in ("time", "_at", "date", "timestamp")
