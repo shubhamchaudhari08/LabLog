@@ -15,6 +15,10 @@
  *            session lets the agent finish its sentence, then switches to that
  *            experiment and opens its workspace.
  *
+ * Completing the bound experiment ends the session the same way: the agent says
+ * it is complete, then the microphone closes. A finished run has nothing left to
+ * record into, and its workspace no longer shows voice controls.
+ *
  * A bench session belongs to one experiment. Another experiment can only take
  * the microphone once the current session has ended.
  */
@@ -61,15 +65,18 @@ export const LIVE_STATES = new Set<VoiceStatusValue>([
 
 /** Tools after which a desk session hands over to the experiment they touched. */
 const HANDOVER_TOOLS = new Set(['create_experiment', 'start_experiment']);
-/** If the agent never finishes speaking (or never starts), hand over anyway. */
-const HANDOVER_TIMEOUT_MS = 10_000;
+/** If the agent never finishes speaking (or never starts), act anyway. */
+const AFTER_REPLY_TIMEOUT_MS = 10_000;
+
+/** What to do once the agent has finished speaking about a tool result. */
+type AfterReply = { switchTo: BoundExperiment } | { end: true };
 
 export function VoiceSessionProvider({ children }: { children: React.ReactNode }) {
   const client = useQueryClient();
   const router = useRouter();
   const [bound, setBound] = useState<BoundExperiment | null>(null);
   const [pendingConnect, setPendingConnect] = useState(false);
-  const [handover, setHandover] = useState<BoundExperiment | null>(null);
+  const [afterReply, setAfterReply] = useState<AfterReply | null>(null);
   const heardReply = useRef(false);
   const boundRef = useRef(bound);
   boundRef.current = bound;
@@ -81,12 +88,15 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
   const onToolSuccess = useCallback(
     (tool: string, data: Record<string, unknown>) => {
       if (experimentId) applyOptimisticToolResult(client, experimentId, tool, data);
+      // The tool.result goes out first (the agent must hear it); the switch or
+      // the hang-up waits for the agent to finish saying what happened.
       if (!boundRef.current && HANDOVER_TOOLS.has(tool) && typeof data.experiment_id === 'string') {
-        // The tool.result goes out first (the agent must hear it); the switch
-        // waits for the agent to finish saying what happened.
         heardReply.current = false;
-        setHandover({ id: data.experiment_id, code: String(data.experiment_code ?? '') });
+        setAfterReply({ switchTo: { id: data.experiment_id, code: String(data.experiment_code ?? '') } });
         void client.invalidateQueries({ queryKey: ['experiments'] });
+      } else if (boundRef.current && tool === 'complete_experiment') {
+        heardReply.current = false;
+        setAfterReply({ end: true });
       }
     },
     [client, experimentId],
@@ -120,26 +130,35 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
     [connectFor, disconnect, router],
   );
 
-  // Hand over once the agent has spoken its confirmation and gone quiet.
+  const act = useCallback(
+    (action: AfterReply) => {
+      if ('switchTo' in action) switchTo(action.switchTo);
+      else disconnect();
+    },
+    [switchTo, disconnect],
+  );
+
+  // Act once the agent has spoken its confirmation and gone quiet.
   useEffect(() => {
-    if (!handover) return;
+    if (!afterReply) return;
     if (voice.status === 'speaking') heardReply.current = true;
     const done = heardReply.current && voice.status === 'listening' && !voice.busy;
     if (done || !live) {
-      setHandover(null);
-      switchTo(handover);
+      setAfterReply(null);
+      // A dropped line has already ended the session; a pending switch still happens.
+      if (live || 'switchTo' in afterReply) act(afterReply);
     }
-  }, [handover, voice.status, voice.busy, live, switchTo]);
+  }, [afterReply, voice.status, voice.busy, live, act]);
 
   useEffect(() => {
-    if (!handover) return;
-    const target = handover;
+    if (!afterReply) return;
+    const action = afterReply;
     const timer = setTimeout(() => {
-      setHandover(null);
-      switchTo(target);
-    }, HANDOVER_TIMEOUT_MS);
+      setAfterReply(null);
+      act(action);
+    }, AFTER_REPLY_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [handover, switchTo]);
+  }, [afterReply, act]);
 
   const bind = useCallback((experiment: BoundExperiment) => {
     // Any live session keeps its binding: a bench session stays on its own
@@ -171,9 +190,9 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
       unbind,
       startVoice,
       switchTo,
-      switching: handover,
+      switching: afterReply && 'switchTo' in afterReply ? afterReply.switchTo : null,
     }),
-    [voice, bound, live, bind, unbind, startVoice, switchTo, handover],
+    [voice, bound, live, bind, unbind, startVoice, switchTo, afterReply],
   );
 
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>;

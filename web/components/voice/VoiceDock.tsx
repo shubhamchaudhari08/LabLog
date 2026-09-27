@@ -68,9 +68,18 @@ export function VoiceDock({
             <span className="font-mono text-primary">{experimentCode}</span> is finished, so voice has nothing to
             record into. Its record stays readable here.
           </p>
-          <Link href="/experiments/new" className="btn-dark h-9">
-            New experiment
-          </Link>
+          {voice.live && voice.bound?.id === experimentId ? (
+            // Normally the session ends itself after complete_experiment; this covers
+            // a run closed some other way (another tab) while the microphone was live.
+            <button type="button" onClick={voice.disconnect} className="btn-dark h-9" aria-label="End voice session">
+              <IconStop className="h-4 w-4 text-primary" />
+              End session
+            </button>
+          ) : (
+            <Link href="/experiments/new" className="btn-dark h-9">
+              New experiment
+            </Link>
+          )}
         </div>
       </div>
     );
