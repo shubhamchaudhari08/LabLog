@@ -51,3 +51,20 @@ Failures use the envelope from `/tools` (001 contracts/tools-api.md), so the web
   {"index":2,"id":"step_3","name":"Load thermocycler","required_fields":[]}
 ]
 ```
+
+---
+
+## Changelog
+
+**2026-09-26: `PUT /protocols/{id}` and `DELETE /protocols/{id}` added (owner request: "edit/delete only by the user who created it").**
+
+- **PUT** takes the same body and validation as POST (`INVALID_ARGS`, `INVALID_UNIT`, `PROTOCOL_CODE_TAKEN`; the protocol's own code does not count as taken). It replaces `protocol_code`, `name`, `version` and `steps`. `owner_id` and `created_at` never change. It returns `{"success": true, "protocol": <stored row>}`.
+- **DELETE** returns `{"success": true, "deleted": "<id>"}`.
+- Both routes:
+  - return **404** for a missing or malformed id
+  - return **403 `NOT_PROTOCOL_OWNER`** unless `owner_id == caller`. Library protocols (`owner_id` null) are therefore never editable.
+  - return **`PROTOCOL_IN_USE`** (HTTP 200, `detail.experiments` lists the codes) when any experiment references the protocol. Its steps are the procedure those runs were recorded against.
+- Every change is audited, and every refusal writes nothing:
+  - `PROTOCOL_UPDATED` carries `{before, after}` full definitions.
+  - `PROTOCOL_DELETED` carries the full deleted definition.
+- The web app shows Edit and Delete only to the creator, and only while the protocol is unused. Edit reuses the create form at `/protocols/new?edit=<id>`.

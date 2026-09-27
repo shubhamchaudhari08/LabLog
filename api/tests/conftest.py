@@ -78,6 +78,10 @@ class _Query:
         self._payload = payload
         return self
 
+    def delete(self) -> "_Query":
+        self._op = "delete"
+        return self
+
     # -- filters -------------------------------------------------------------
     def eq(self, column: str, value: Any) -> "_Query":
         self._filters.append(("eq", column, value))
@@ -166,6 +170,10 @@ class _Query:
         if self._op == "update":
             for row in matched:
                 row.update(self._payload)
+            return _Result(matched)
+
+        if self._op == "delete":
+            self._store.tables[self._table] = [r for r in rows if r not in matched]
             return _Result(matched)
 
         if self._order:

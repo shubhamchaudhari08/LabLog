@@ -76,6 +76,8 @@ export interface ProtocolSummary {
   name: string;
   version: string | null;
   steps: ProtocolStep[];
+  /** null for a shared library protocol: nobody's to edit or delete. */
+  owner_id?: string | null;
   experiments?: { count: number }[];
 }
 

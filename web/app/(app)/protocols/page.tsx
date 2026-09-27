@@ -4,19 +4,22 @@
  * The protocol library, master and detail.
  *
  * A protocol is created here (New protocol → POST /protocols) or dictated during
- * a run (write_protocol_step). Once it exists its steps change only by voice:
- * there is no form editor, because a second way to change a step would be a
- * second write path (specs/002-manual-protocol-authoring).
+ * a run (write_protocol_step). Its creator can edit or delete it here until an
+ * experiment uses it (PUT/DELETE /protocols/{id}); after that its steps are the
+ * procedure a run was recorded against, and are fixed. Library protocols
+ * (no owner) are read-only for everyone.
  */
 
-import { Suspense } from 'react';
+import { Suspense, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { usePageCrumbs } from '@/components/shell/AppShell';
+import { useCurrentUser, usePageCrumbs } from '@/components/shell/AppShell';
+import { deleteProtocol } from '@/lib/api';
 import { ProtocolSteps, readingsRequired } from '@/components/protocol/ProtocolSteps';
 import { StatusBadge } from '@/components/workspace/StatusBadge';
-import { IconPlus, IconProtocol } from '@/components/icons';
+import { IconPencil, IconPlus, IconProtocol, IconTrash } from '@/components/icons';
 import { useExperimentList, useProtocolList } from '@/lib/queries/useExperiment';
 
 function ProtocolLibrary() {
@@ -34,6 +37,31 @@ function ProtocolLibrary() {
   );
 
   const runs = (experiments.data ?? []).filter((e) => e.protocol_id === selected?.id);
+  const user = useCurrentUser();
+  const client = useQueryClient();
+  const [deleting, setDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const mine = Boolean(selected && user && selected.owner_id === user.id);
+  const inUse = (selected?.experiments?.[0]?.count ?? runs.length) > 0;
+
+  async function remove() {
+    if (!selected || !window.confirm(`Delete ${selected.protocol_code} · ${selected.name}? This cannot be undone.`)) return;
+    setDeleting(true);
+    setActionError(null);
+    try {
+      const result = await deleteProtocol(selected.id);
+      if (!result.success) {
+        setActionError(result.message);
+        return;
+      }
+      await client.invalidateQueries({ queryKey: ['protocols'] });
+      router.replace('/protocols', { scroll: false });
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'The protocol was not deleted.');
+    } finally {
+      setDeleting(false);
+    }
+  }
   const types = Array.from(new Set((selected?.steps ?? []).flatMap(readingsRequired)));
 
   return (
@@ -42,8 +70,8 @@ function ProtocolLibrary() {
         <div>
           <h1 className="page-title">Protocols</h1>
           <p className="mt-xs max-w-[60ch] text-body-md text-muted">
-            The steps each experiment follows. Create one here or dictate it during a run. After
-            that, its steps change only by voice.
+            The steps each experiment follows. Create one here or dictate it during a run. You can
+            edit or delete a protocol you created until an experiment uses it.
           </p>
         </div>
         <Link href="/protocols/new" className="btn-primary">
@@ -99,9 +127,35 @@ function ProtocolLibrary() {
         {selected && (
           <article key={selected.id} className="card animate-slide-up overflow-hidden">
             <header className="bloom border-b border-hairline px-lg pb-lg pt-lg">
-              <p className="eyebrow">
-                <span className="font-mono">{selected.protocol_code}</span> · {selected.version ?? 'unversioned'}
-              </p>
+              <div className="flex flex-wrap items-start justify-between gap-sm">
+                <p className="eyebrow">
+                  <span className="font-mono">{selected.protocol_code}</span> · {selected.version ?? 'unversioned'}
+                  {selected.owner_id == null && <span className="ml-xs normal-case text-muted-soft">· library, read-only</span>}
+                </p>
+                {mine && (
+                  <div className="flex gap-xs">
+                    {inUse ? (
+                      <span className="text-caption text-muted-soft" title="Its steps are what those runs were recorded against.">
+                        In use by a run, so it can no longer be edited or deleted
+                      </span>
+                    ) : (
+                      <>
+                        <Link href={`/protocols/new?edit=${selected.id}`} className="btn-secondary h-9">
+                          <IconPencil className="h-4 w-4" /> Edit
+                        </Link>
+                        <button type="button" className="btn-danger h-9" onClick={remove} disabled={deleting}>
+                          <IconTrash className="h-4 w-4" /> {deleting ? 'Deleting…' : 'Delete'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+              {actionError && (
+                <p role="alert" className="mt-xs text-body-sm text-error">
+                  {actionError}
+                </p>
+              )}
               <h2 className="mt-xs text-display-sm">{selected.name}</h2>
               <dl className="mt-md flex flex-wrap gap-x-xl gap-y-sm text-body-sm">
                 <div>

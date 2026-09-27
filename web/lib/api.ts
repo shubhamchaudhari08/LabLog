@@ -162,11 +162,11 @@ export type CreateExperimentResult =
 
 export type StartExperimentResult = { success: true; experiment: CreatedExperiment } | Refusal;
 
-async function postJson<T>(path: string, body: unknown, what: string): Promise<T | Refusal> {
+async function postJson<T>(path: string, body: unknown, what: string, method = 'POST'): Promise<T | Refusal> {
   let response: Response;
   try {
     response = await fetch(`${env.apiUrl}${path}`, {
-      method: 'POST',
+      method,
       headers: await authHeaders(),
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -177,7 +177,10 @@ async function postJson<T>(path: string, body: unknown, what: string): Promise<T
     return { success: false, error: 'UNAUTHENTICATED', message: 'Your session expired. Sign in again.' };
   }
   if (response.status === 403) {
-    return { success: false, error: 'FORBIDDEN', message: 'This experiment belongs to another account.' };
+    return { success: false, error: 'FORBIDDEN', message: 'Only the account that created this can change it.' };
+  }
+  if (response.status === 404) {
+    return { success: false, error: 'NOT_FOUND', message: 'It no longer exists. Refresh the page.' };
   }
   if (!response.ok) throw new Error(`The ${what} (${response.status}).`);
   return response.json();
@@ -193,4 +196,17 @@ export function startExperiment(experimentId: string): Promise<StartExperimentRe
     undefined,
     "experiment wasn't started",
   ) as Promise<StartExperimentResult>;
+}
+
+// Edit / delete a protocol: only its creator, and only while no experiment uses it
+// (api/app/routers/protocols.py). A refusal says why, e.g. PROTOCOL_IN_USE.
+
+export function updateProtocol(protocolId: string, draft: ProtocolDraft): Promise<CreateProtocolResult> {
+  return postJson(`/protocols/${encodeURIComponent(protocolId)}`, draft, "protocol wasn't saved", 'PUT') as Promise<CreateProtocolResult>;
+}
+
+export function deleteProtocol(protocolId: string): Promise<{ success: true; deleted: string } | Refusal> {
+  return postJson(`/protocols/${encodeURIComponent(protocolId)}`, undefined, "protocol wasn't deleted", 'DELETE') as Promise<
+    { success: true; deleted: string } | Refusal
+  >;
 }

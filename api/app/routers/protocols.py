@@ -7,15 +7,20 @@ protocol belongs to none. So this route runs the same sequence itself:
 authenticate → validate structurally → validate semantically → write → audit →
 return the stored row.
 
-Only creation lives here. Changing the steps of an existing protocol stays on
-the voice path (write_protocol_step), which already refuses shared protocols.
+Creation, and, for the protocol's creator only, editing and deleting it
+(PUT/DELETE /protocols/{id}). Neither is allowed once any experiment uses the
+protocol: its steps are the procedure those runs were recorded against, and
+rewriting or removing them would falsify the record (Constitution Principle II).
+Library protocols (owner_id null) belong to no one and are never editable.
+Every edit and delete appends an event carrying the full prior definition.
 """
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 
 from ..audit import write_event
@@ -67,7 +72,7 @@ def _stored_steps(steps: list[ProtocolStepIn]) -> list[dict[str, Any]]:
     return stored
 
 
-def _code_taken(sb, code: str, user_id: str) -> dict[str, Any] | None:
+def _code_taken(sb, code: str, user_id: str, exclude_id: str | None = None) -> dict[str, Any] | None:
     """A protocol this user can already read under the same code, ignoring case.
 
     ponytail: check-then-insert, so two simultaneous saves of one code can both
@@ -78,7 +83,66 @@ def _code_taken(sb, code: str, user_id: str) -> dict[str, Any] | None:
         sb.table("protocols").select("*").is_("owner_id", "null").execute().data or []
     )
     wanted = code.casefold()
-    return next((p for p in readable if str(p.get("protocol_code", "")).casefold() == wanted), None)
+    return next(
+        (p for p in readable if str(p.get("protocol_code", "")).casefold() == wanted and p.get("id") != exclude_id),
+        None,
+    )
+
+
+def _validated(body: dict[str, Any]) -> tuple[CreateProtocolRequest | None, dict[str, Any] | None]:
+    """Structural, then unit, validation: shared by create and edit, all before any write."""
+    try:
+        request = CreateProtocolRequest(**body)
+    except ValidationError as exc:
+        return None, _fail(
+            "INVALID_ARGS",
+            "Some protocol fields are missing or invalid.",
+            errors=exc.errors(include_url=False),
+        )
+    for index, step in enumerate(request.steps):
+        for reading in step.readings:
+            listed = vocabulary.lookup(reading.type)
+            if listed and reading.unit and reading.unit not in listed.units:
+                return None, _fail(
+                    "INVALID_UNIT",
+                    f"{listed.name} is recorded in {', '.join(listed.units)}, not {reading.unit}.",
+                    step_index=index,
+                    type=listed.name,
+                    allowed=list(listed.units),
+                )
+    return request, None
+
+
+def _snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    """The whole definition, so an edited or deleted protocol stays retrievable from events."""
+    return {k: row.get(k) for k in ("protocol_code", "name", "version", "steps")}
+
+
+def _owned_and_unused(sb, protocol_id: str, user_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """(protocol, None), or (None, a refusal). 404 and 403 are raised."""
+    try:
+        uuid.UUID(protocol_id)  # Postgres rejects a malformed uuid with an error, not an empty result
+    except ValueError:
+        raise HTTPException(status_code=404, detail="PROTOCOL_NOT_FOUND") from None
+    rows = sb.table("protocols").select("*").eq("id", protocol_id).execute().data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="PROTOCOL_NOT_FOUND")
+    protocol = rows[0]
+    # Only the creator. Library protocols (owner_id null) have no creator to match.
+    # The service role bypasses RLS, so this line is the only control.
+    if protocol.get("owner_id") != user_id:
+        raise HTTPException(status_code=403, detail="NOT_PROTOCOL_OWNER")
+
+    runs = sb.table("experiments").select("experiment_code").eq("protocol_id", protocol_id).execute().data or []
+    if runs:
+        codes = sorted(r["experiment_code"] for r in runs)
+        return None, _fail(
+            "PROTOCOL_IN_USE",
+            f"{protocol['protocol_code']} is used by {', '.join(codes)}, so it can no longer be changed or deleted. "
+            "Create a new protocol, or a new version, instead.",
+            experiments=codes,
+        )
+    return protocol, None
 
 
 @router.post("/protocols")
@@ -87,28 +151,10 @@ async def create_protocol(
 ) -> dict[str, Any]:
     # 1. JWT verified by the dependency; a failure raised 401 before we got here.
 
-    # 2. Structural validation.
-    try:
-        request = CreateProtocolRequest(**body)
-    except ValidationError as exc:
-        return _fail(
-            "INVALID_ARGS",
-            "Some protocol fields are missing or invalid.",
-            errors=exc.errors(include_url=False),
-        )
-
-    # 3. Semantic validation against stored reality — all before any write.
-    for index, step in enumerate(request.steps):
-        for reading in step.readings:
-            listed = vocabulary.lookup(reading.type)
-            if listed and reading.unit and reading.unit not in listed.units:
-                return _fail(
-                    "INVALID_UNIT",
-                    f"{listed.name} is recorded in {', '.join(listed.units)}, not {reading.unit}.",
-                    step_index=index,
-                    type=listed.name,
-                    allowed=list(listed.units),
-                )
+    # 2-3. Structural and unit validation, before any write.
+    request, problem = _validated(body)
+    if problem:
+        return problem
 
     sb = supabase_admin()
     existing = _code_taken(sb, request.protocol_code, user.id)
@@ -153,3 +199,66 @@ async def create_protocol(
 
     # 6. The stored row, not the request.
     return {"success": True, "protocol": row}
+
+
+@router.put("/protocols/{protocol_id}")
+async def update_protocol(
+    protocol_id: str, body: dict[str, Any], user: User = Depends(get_current_user)
+) -> dict[str, Any]:
+    request, problem = _validated(body)
+    if problem:
+        return problem
+
+    sb = supabase_admin()
+    protocol, refusal = _owned_and_unused(sb, protocol_id, user.id)
+    if refusal:
+        return refusal
+
+    existing = _code_taken(sb, request.protocol_code, user.id, exclude_id=protocol_id)
+    if existing:
+        return _fail("PROTOCOL_CODE_TAKEN", f'{request.protocol_code} is already used by "{existing.get("name")}".')
+
+    row = (
+        sb.table("protocols")
+        .update(
+            {
+                "protocol_code": request.protocol_code,
+                "name": request.name,
+                "version": request.version,
+                "steps": _stored_steps(request.steps),
+            }
+        )
+        .eq("id", protocol_id)
+        .execute()
+    ).data[0]
+
+    write_event(
+        sb,
+        experiment_id=None,
+        event_type="PROTOCOL_UPDATED",
+        entity_type="protocol",
+        entity_id=protocol_id,
+        payload={"before": _snapshot(protocol), "after": _snapshot(row)},
+        actor_id=user.id,
+    )
+    return {"success": True, "protocol": row}
+
+
+@router.delete("/protocols/{protocol_id}")
+async def delete_protocol(protocol_id: str, user: User = Depends(get_current_user)) -> dict[str, Any]:
+    sb = supabase_admin()
+    protocol, refusal = _owned_and_unused(sb, protocol_id, user.id)
+    if refusal:
+        return refusal
+
+    sb.table("protocols").delete().eq("id", protocol_id).execute()
+    write_event(
+        sb,
+        experiment_id=None,
+        event_type="PROTOCOL_DELETED",
+        entity_type="protocol",
+        entity_id=protocol_id,
+        payload=_snapshot(protocol),
+        actor_id=user.id,
+    )
+    return {"success": True, "deleted": protocol_id}

@@ -9,14 +9,15 @@
  * uses; an unlisted type is still allowed, with a free-text unit.
  */
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { usePageCrumbs } from '@/components/shell/AppShell';
 import { IconChevron, IconClose, IconPlus, IconTrash } from '@/components/icons';
-import { createProtocol, fetchMeasurementTypes, type MeasurementType, type ProtocolDraft } from '@/lib/api';
+import { createProtocol, fetchMeasurementTypes, updateProtocol, type MeasurementType, type ProtocolDraft } from '@/lib/api';
+import { useProtocolList, type ProtocolSummary } from '@/lib/queries/useExperiment';
 
 interface ReadingDraft {
   key: string;
@@ -42,6 +43,22 @@ type Errors = Record<string, string>;
 
 const newKey = () => crypto.randomUUID();
 const emptyStep = (): StepDraft => ({ key: newKey(), name: '', readings: [] });
+
+/** A stored protocol back into form state: required_fields minus sample_id are the readings. */
+function fromStored(protocol: ProtocolSummary): FormState {
+  return {
+    protocol_code: protocol.protocol_code,
+    name: protocol.name,
+    version: protocol.version ?? 'v1',
+    steps: protocol.steps.map((step) => ({
+      key: newKey(),
+      name: step.name,
+      readings: (step.required_fields ?? [])
+        .filter((f) => f !== 'sample_id')
+        .map((type) => ({ key: newKey(), type, unit: step.default_unit?.[type] ?? '' })),
+    })),
+  };
+}
 
 /** What gets sent, and what "dirty" is measured against: the words and their order, never the keys. */
 function toDraft(form: FormState): ProtocolDraft {
@@ -113,15 +130,18 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   );
 }
 
-export default function NewProtocolPage() {
-  usePageCrumbs([{ label: 'Protocols', href: '/protocols' }, { label: 'New protocol' }]);
+/** New protocol, or (with `source`) edit one the user created that no experiment uses yet. */
+function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
+  usePageCrumbs([{ label: 'Protocols', href: '/protocols' }, { label: source ? `Edit ${source.protocol_code}` : 'New protocol' }]);
 
   const router = useRouter();
   const queryClient = useQueryClient();
   const types = useQuery({ queryKey: ['measurement-types'], queryFn: fetchMeasurementTypes, staleTime: Infinity });
   const vocabulary = types.data ?? [];
 
-  const [form, setForm] = useState<FormState>(() => ({ protocol_code: '', name: '', version: 'v1', steps: [emptyStep()] }));
+  const [form, setForm] = useState<FormState>(() =>
+    source ? fromStored(source) : { protocol_code: '', name: '', version: 'v1', steps: [emptyStep()] },
+  );
   const [initial] = useState(() => JSON.stringify(toDraft(form)));
   const [errors, setErrors] = useState<Errors>({});
   const [saving, setSaving] = useState(false);
@@ -183,7 +203,7 @@ export default function NewProtocolPage() {
   }
 
   function confirmLeave(event: MouseEvent) {
-    if (dirty && !window.confirm('Discard this protocol draft?')) event.preventDefault();
+    if (dirty && !window.confirm(source ? 'Discard your changes?' : 'Discard this protocol draft?')) event.preventDefault();
   }
 
   async function save(event: FormEvent) {
@@ -199,7 +219,7 @@ export default function NewProtocolPage() {
 
     setSaving(true);
     try {
-      const result = await createProtocol(toDraft(form));
+      const result = source ? await updateProtocol(source.id, toDraft(form)) : await createProtocol(toDraft(form));
       if (result.success) {
         saved.current = true;
         await queryClient.invalidateQueries({ queryKey: ['protocols'] });
@@ -223,7 +243,7 @@ export default function NewProtocolPage() {
   return (
     <main id="main" className="page">
       <header className="animate-rise">
-        <h1 className="page-title">New protocol</h1>
+        <h1 className="page-title">{source ? `Edit ${source.protocol_code}` : 'New protocol'}</h1>
         <p className="mt-xs max-w-[60ch] text-body-md text-muted">
           Write the steps in the order they are done. The agent reads them back word for word during a run and never
           fills in a missing step.
@@ -528,5 +548,46 @@ export default function NewProtocolPage() {
         </div>
       </form>
     </main>
+  );
+}
+
+function ProtocolFormPage() {
+  const editId = useSearchParams().get('edit');
+  const protocols = useProtocolList();
+  if (!editId) return <ProtocolEditor />;
+  if (protocols.isLoading) return <main className="page"><div className="skeleton h-9 w-64" /></main>;
+
+  const source = protocols.data?.find((p) => p.id === editId);
+  if (!source)
+    return (
+      <main id="main" className="page">
+        <h1 className="page-title">Protocol unavailable</h1>
+        <p className="mt-sm text-body-md text-muted">It may have been deleted, or it is not one you can read.</p>
+      </main>
+    );
+  // The server is the guarantee (PUT /protocols refuses); this just avoids offering a form that cannot save.
+  const inUse = (source.experiments?.[0]?.count ?? 0) > 0;
+  if (source.owner_id == null || inUse)
+    return (
+      <main id="main" className="page">
+        <h1 className="page-title">{source.protocol_code} can&apos;t be edited</h1>
+        <p className="mt-sm max-w-[60ch] text-body-md text-muted">
+          {inUse
+            ? 'An experiment uses it, so its steps are the procedure that run was recorded against. Create a new protocol or version instead.'
+            : 'It is a shared library protocol.'}
+        </p>
+        <Link href={`/protocols?id=${source.id}`} className="btn-secondary mt-md inline-flex">
+          Back to the protocol
+        </Link>
+      </main>
+    );
+  return <ProtocolEditor key={source.id} source={source} />;
+}
+
+export default function ProtocolFormRoute() {
+  return (
+    <Suspense fallback={<main className="page" />}>
+      <ProtocolFormPage />
+    </Suspense>
   );
 }

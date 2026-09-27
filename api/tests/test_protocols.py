@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routers import protocols as protocols_router
-from tests.conftest import OTHER_USER_ID, OWNER_ID, FakeSupabase
+from tests.conftest import OTHER_USER_ID, OWNER_ID, PROTOCOL_ID, FakeSupabase
 from tests.test_api import JWT_SECRET, make_token
 
 URL = "/protocols"
@@ -236,3 +236,114 @@ def test_rejects_listed_type_with_foreign_unit(client, sb):
         client, sb, one_step(readings=[{"type": "pH", "unit": "C"}]), "INVALID_UNIT"
     )
     assert result["detail"] == {"step_index": 0, "type": "pH", "allowed": ["pH"]}
+
+
+# ---------------------------------------------------------------------------
+# PUT / DELETE /protocols/{id}: only the creator, only while no experiment uses it.
+# ---------------------------------------------------------------------------
+
+EDITED = {
+    "protocol_code": "PCR-03",
+    "name": "Colony PCR screen (revised)",
+    "version": "v2",
+    "steps": [{"name": "Record initial temperature", "readings": [{"type": "temperature", "unit": "C"}]}],
+}
+
+
+def _mine(client) -> dict:
+    return client.post(URL, json=CONTRACT_REQUEST, headers=auth()).json()["protocol"]
+
+
+def _as(user: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {make_token(user)}"}
+
+
+def _counts(sb):
+    return sb.count("protocols"), sb.count("events")
+
+
+def test_creator_edits_protocol_and_prior_definition_is_audited(client, sb):
+    mine = _mine(client)
+    res = client.put(f"{URL}/{mine['id']}", json=EDITED, headers=auth()).json()
+
+    assert res["success"], res
+    assert res["protocol"]["id"] == mine["id"]
+    assert res["protocol"]["protocol_code"] == "PCR-03"
+    assert res["protocol"]["steps"] == [CONTRACT_STEPS[0]]
+    assert res["protocol"]["owner_id"] == OWNER_ID
+
+    event = sb.rows("events")[-1]
+    assert event["event_type"] == "PROTOCOL_UPDATED" and event["entity_id"] == mine["id"]
+    assert event["payload"]["before"]["steps"] == CONTRACT_STEPS
+    assert event["payload"]["after"]["name"] == "Colony PCR screen (revised)"
+
+
+def test_edit_may_keep_its_own_code(client, sb):
+    mine = _mine(client)
+    res = client.put(f"{URL}/{mine['id']}", json={**EDITED, "protocol_code": "pcr-02"}, headers=auth()).json()
+    assert res["success"], res
+
+
+def test_creator_deletes_protocol_and_snapshot_is_kept(client, sb):
+    mine = _mine(client)
+    res = client.delete(f"{URL}/{mine['id']}", headers=auth()).json()
+
+    assert res == {"success": True, "deleted": mine["id"]}
+    assert all(p["id"] != mine["id"] for p in sb.rows("protocols"))
+    event = sb.rows("events")[-1]
+    assert event["event_type"] == "PROTOCOL_DELETED"
+    assert event["payload"]["steps"] == CONTRACT_STEPS
+
+
+@pytest.mark.parametrize("method", ["put", "delete"])
+def test_other_user_cannot_edit_or_delete(client, sb, method):
+    mine = _mine(client)
+    before = _counts(sb)
+    kwargs = {"json": EDITED} if method == "put" else {}
+    res = getattr(client, method)(f"{URL}/{mine['id']}", headers=_as(OTHER_USER_ID), **kwargs)
+    assert res.status_code == 403
+    assert _counts(sb) == before
+    assert next(p for p in sb.rows("protocols") if p["id"] == mine["id"])["name"] == "Colony PCR screen"
+
+
+@pytest.mark.parametrize("method", ["put", "delete"])
+def test_library_protocol_is_nobodys_to_change(client, sb, method):
+    # The seeded STAB protocol is a shared library protocol (owner_id null).
+    before = _counts(sb)
+    kwargs = {"json": EDITED} if method == "put" else {}
+    res = getattr(client, method)(f"{URL}/{PROTOCOL_ID}", headers=auth(), **kwargs)
+    assert res.status_code == 403
+    assert _counts(sb) == before
+
+
+@pytest.mark.parametrize("method", ["put", "delete"])
+def test_protocol_in_use_cannot_be_edited_or_deleted(client, sb, method):
+    mine = _mine(client)
+    sb.rows("experiments").append({"id": "e9", "experiment_code": "PCR-02-1", "protocol_id": mine["id"], "owner_id": OWNER_ID, "status": "DRAFT"})
+    before = _counts(sb)
+    kwargs = {"json": EDITED} if method == "put" else {}
+    res = getattr(client, method)(f"{URL}/{mine['id']}", headers=auth(), **kwargs).json()
+    assert res["error"] == "PROTOCOL_IN_USE" and res["detail"]["experiments"] == ["PCR-02-1"]
+    assert _counts(sb) == before
+
+
+def test_edit_rejections_write_nothing(client, sb):
+    mine = _mine(client)
+    client.post(URL, json={**CONTRACT_REQUEST, "protocol_code": "OTHER-1"}, headers=auth())
+    before = _counts(sb)
+    assert client.put(f"{URL}/{mine['id']}", json={**EDITED, "steps": []}, headers=auth()).json()["error"] == "INVALID_ARGS"
+    assert client.put(f"{URL}/{mine['id']}", json={**EDITED, "protocol_code": "other-1"}, headers=auth()).json()["error"] == "PROTOCOL_CODE_TAKEN"
+    bad_unit = {**EDITED, "steps": [{"name": "x", "readings": [{"type": "pH", "unit": "C"}]}]}
+    assert client.put(f"{URL}/{mine['id']}", json=bad_unit, headers=auth()).json()["error"] == "INVALID_UNIT"
+    assert _counts(sb) == before
+
+
+@pytest.mark.parametrize("path", ["not-a-uuid", "99999999-9999-9999-9999-999999999999"])
+def test_missing_protocol_is_404(client, sb, path):
+    assert client.delete(f"{URL}/{path}", headers=auth()).status_code == 404
+    assert client.put(f"{URL}/{path}", json=EDITED, headers=auth()).status_code == 404
+
+
+def test_edit_and_delete_require_a_token(client, sb):
+    assert client.put(f"{URL}/{PROTOCOL_ID}", json=EDITED).status_code == 401
+    assert client.delete(f"{URL}/{PROTOCOL_ID}").status_code == 401
