@@ -4,6 +4,8 @@ Voice-native laboratory notebook. Say "A17 is 4.2 Celsius" and a validated,
 audited measurement lands in Postgres and on screen while the agent confirms
 what was actually stored.
 
+**The public demo can be accessed using the link:** `https://lablog-web.vercel.app`
+
 - **AssemblyAI Voice Agent API** owns the conversation: speech recognition, turn
   detection, reasoning, tool selection, speech and barge-in, over one WebSocket
   that runs browser ↔ AssemblyAI.
