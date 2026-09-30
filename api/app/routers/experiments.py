@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from .. import lifecycle
 from ..db import load_experiment, load_protocol
 from ..deps import User, get_current_user, supabase_admin
-from ..samples import validate_sample_codes
+from ..samples import DEFAULT_SAMPLE_TYPE, validate_sample_codes, validate_samples
 
 router = APIRouter(prefix="/experiments")
 
@@ -34,6 +34,13 @@ def _fail(error: str, message: str, **detail: Any) -> dict[str, Any]:
     return body
 
 
+class SampleIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    code: str
+    sample_type: str | None = None
+
+
 class CreateExperimentRequest(BaseModel):
     # Unknown keys are IGNORED: a browser that sends owner_id, status,
     # experiment_code or a timestamp must not get to set them.
@@ -43,6 +50,8 @@ class CreateExperimentRequest(BaseModel):
     description: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] | None = None
     protocol_id: str | None = None
     sample_codes: list[str] = Field(default_factory=list, max_length=50)
+    # specs/007: codes with types. When given, it replaces sample_codes.
+    samples: list[SampleIn] | None = Field(None, max_length=50)
     start: bool = False
 
 
@@ -72,7 +81,7 @@ async def create_experiment(body: dict[str, Any], user: User = Depends(get_curre
     try:
         request = CreateExperimentRequest(**body)
     except ValidationError as exc:
-        return _fail("INVALID_ARGS", "Some experiment fields are missing or invalid.", errors=exc.errors(include_url=False))
+        return _fail("INVALID_ARGS", "Some experiment fields are missing or invalid.", errors=exc.errors(include_url=False, include_context=False))
 
     # 3. Semantic validation — all of it before the first write.
     sb = supabase_admin()
@@ -82,9 +91,21 @@ async def create_experiment(body: dict[str, Any], user: User = Depends(get_curre
         if protocol is None:
             return _fail("PROTOCOL_NOT_FOUND", "That protocol does not exist or is not yours to use.")
 
-    codes, problem = validate_sample_codes(request.sample_codes)
+    if request.samples is not None:
+        codes, types, problem = validate_samples([s.model_dump() for s in request.samples])
+    else:
+        codes, problem = validate_sample_codes(request.sample_codes)
+        types: dict[str, str] = {}
     if problem:
         return {"success": False, **problem}
+
+    # Samples can only be added here, so a run that could never be completed is
+    # never created (specs/007 FR-713), started or not.
+    shortfall = lifecycle.sample_shortfall(
+        protocol, [{"code": c, "sample_type": types.get(c, DEFAULT_SAMPLE_TYPE)} for c in codes]
+    )
+    if shortfall:
+        return {"success": False, **shortfall}
 
     if request.start and protocol is None:
         return _fail("NO_PROTOCOL", "Choose a protocol to start the experiment, or create it as a draft.")
@@ -99,6 +120,7 @@ async def create_experiment(body: dict[str, Any], user: User = Depends(get_curre
             protocol=protocol,
             sample_codes=codes,
             source="ui",
+            sample_types=types,
         )
     except lifecycle.CodeUnavailable:
         return _fail("CODE_UNAVAILABLE", "Could not allocate an experiment code. Try again.")
@@ -120,7 +142,7 @@ async def start_experiment(experiment_id: str, user: User = Depends(get_current_
     if experiment.get("owner_id") != user.id:
         raise HTTPException(status_code=403, detail="FORBIDDEN")
 
-    problem = lifecycle.start_error(experiment)
+    problem = lifecycle.start_error(sb, experiment)
     if problem:
         return {"success": False, **problem}
 

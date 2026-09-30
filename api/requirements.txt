@@ -8,6 +8,7 @@ httpx==0.28.1
 PyJWT[crypto]==2.10.1  # crypto: ES256/RS256 for Supabase signing keys
 supabase==2.11.0
 python-dotenv==1.0.1
+tzdata==2024.1  # zoneinfo's data on Windows and slim images (specs/006 R-405)
 
 # --- test + eval ---
 pytest==8.3.4

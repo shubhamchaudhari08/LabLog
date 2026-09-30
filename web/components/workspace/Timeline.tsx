@@ -16,8 +16,24 @@ const EVENT_LABEL: Record<string, string> = {
   PROTOCOL_STEP_UPDATED: 'Step revised',
   PROTOCOL_STEP_REMOVED: 'Step removed',
   PROTOCOL_STEP_COMPLETED: 'Step completed',
+  PROTOCOL_STEP_STARTED: 'Step started',
+  DEVIATIONS_REVIEWED: 'Deviations reviewed',
   EXPERIMENT_COMPLETED: 'Experiment completed',
+  TIMER_STARTED: 'Timer started',
+  TIMER_CANCELLED: 'Timer cancelled',
 };
+
+/** The second line for a timer entry: what was timed, as the server stored it. */
+function timerDetail(event: { event_type: string; payload?: Record<string, unknown> }): string | null {
+  const p = event.payload ?? {};
+  if (event.event_type === 'TIMER_STARTED') {
+    return [p.duration_spoken, p.step_name].filter(Boolean).join(' · ') || null;
+  }
+  if (event.event_type === 'TIMER_CANCELLED') {
+    return p.reason === 'replaced' ? 'replaced by a new timer' : ((p.step_name as string) ?? null);
+  }
+  return null;
+}
 
 export function ExperimentTimeline({
   events,
@@ -37,15 +53,18 @@ export function ExperimentTimeline({
             >
               <time
                 dateTime={event.created_at}
-                className="tabular w-16 shrink-0 font-mono text-caption text-muted-soft"
+                className="tabular w-16 shrink-0 font-mono text-caption text-muted"
               >
                 {new Date(event.created_at).toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit',
                 })}
               </time>
-              <span className="text-body-sm text-body">
+              <span className="text-body-md text-body">
                 {EVENT_LABEL[event.event_type] ?? event.event_type}
+                {timerDetail(event) && (
+                  <span className="block text-caption text-muted">{timerDetail(event)}</span>
+                )}
               </span>
             </li>
           ))}
@@ -56,7 +75,7 @@ export function ExperimentTimeline({
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="py-md text-body-sm text-muted-soft">{children}</p>;
+  return <p className="py-md text-body-md text-muted">{children}</p>;
 }
 
 function PanelShell({
@@ -71,10 +90,10 @@ function PanelShell({
   return (
     <section aria-labelledby={`${label}-heading`}>
       <header className="flex items-baseline justify-between border-b border-hairline pb-xs">
-        <h2 id={`${label}-heading`} className="panel-label">
+        <h2 id={`${label}-heading`} className="eyebrow">
           {label}
         </h2>
-        {count !== undefined && <span className="tabular text-caption text-muted-soft">{count}</span>}
+        {count !== undefined && <span className="tabular text-caption text-muted">{count}</span>}
       </header>
       {children}
     </section>

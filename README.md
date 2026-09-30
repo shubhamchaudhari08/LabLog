@@ -13,7 +13,6 @@ what was actually stored.
   the backend receives a function call and returns a row. That's a dispatcher,
   and wrapping it in LangGraph would add a layer while giving no control.
 
-Design: [`specs/001-lablog-voice-notebook/`](specs/001-lablog-voice-notebook/plan.md)
 
 ## Run it
 
@@ -60,8 +59,33 @@ the unit) → "Celsius." → "Note A18 looks slightly cloudy." → "Change A17 t
 next?" (declines) → talk over the agent → "Finish the experiment." (lists what's
 missing) → record it → "Finish the experiment." → "Yes."
 
-## Not yet measured
+## Timers
 
-The Phase 0 entity-accuracy spike (spoken sample IDs, with and without
-`input.keyterms`) needs a microphone and hasn't been run. Its accuracy figures
-belong here.
+A countdown on the current protocol step. Say "start a
+timer for 10 minutes", "how long is left?" or "stop the timer". When the current
+step's text states one duration ("Centrifuge at 4,000 rpm for 10 minutes"), the
+agent offers the timer and starts it only after a yes. The countdown shows beside
+its step and in the header on every screen. At zero the app beeps for about three
+seconds, then the agent says the timer is complete. On the bench, a timed step
+also has **Start timer** and **Cancel** buttons that work without voice.
+
+One timer runs per experiment. Timers exist only on a RUNNING experiment, run
+from 5 seconds to 24 hours, and are recorded in the activity log. Durations are
+read from digits in the step text: "10 min" is detected, "ten minutes" is not.
+
+## Search and comparison
+
+With no experiment open, voice can find past runs:
+"Show my PCR experiments from this week", "Find experiments containing sample A17",
+"Which experiments had temperature deviations?", "Open yesterday's enzyme stability
+experiment". Filters are fixed: words in the name or protocol, a period (today,
+yesterday, this week, last week, this month), status, a sample, and deviations. The
+browser sends its time zone with each tool call, and the server works out the dates.
+"Open" opens a single match: a finished run read-only, a running run for recording.
+
+During a run, "How does this temperature compare with the previous run?" compares
+with the same sample, type and step in the latest completed run of the same protocol.
+The backend does the arithmetic and returns the sentence the agent says.
+
+
+

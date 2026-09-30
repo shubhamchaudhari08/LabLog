@@ -17,6 +17,11 @@ def _norm(text: Any) -> str:
     return " ".join(str(text or "").split()).casefold()
 
 
+# Said around a protocol's name, not part of it: "the sample stability protocol".
+# The agent passes what the user said (specs/007 R-716), so these arrive too.
+_FILLER = {"the", "a", "an", "protocol"}
+
+
 def _pick(rows: list[dict[str, Any]], tiers) -> list[dict[str, Any]]:
     """The hits of the first tier that matches anything."""
     for match in tiers:
@@ -44,7 +49,7 @@ def resolve_protocol(sb, user_id: str, ref: str) -> dict[str, Any]:
     """
     rows = readable_protocols(sb, user_id)
     wanted = _norm(ref)
-    words = wanted.split()
+    words = [w for w in wanted.split() if w not in _FILLER]
     hits = _pick(
         rows,
         [

@@ -18,7 +18,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCurrentUser, usePageCrumbs } from '@/components/shell/AppShell';
 import { deleteProtocol } from '@/lib/api';
 import { ProtocolSteps, readingsRequired } from '@/components/protocol/ProtocolSteps';
-import { StatusBadge } from '@/components/workspace/StatusBadge';
+import { StatusPill } from '@/components/ui/StatusPill';
+import { ButtonLink } from '@/components/ui/Button';
+import { IconTile, LockPill } from '@/components/ui/bits';
+import { experimentHref } from '@/lib/history';
+import { displayName } from '@/lib/ui/displayName';
 import { IconPencil, IconPlus, IconProtocol, IconTrash } from '@/components/icons';
 import { useExperimentList, useProtocolList } from '@/lib/queries/useExperiment';
 
@@ -69,21 +73,21 @@ function ProtocolLibrary() {
       <header className="flex animate-rise flex-wrap items-end justify-between gap-md">
         <div>
           <h1 className="page-title">Protocols</h1>
-          <p className="mt-xs max-w-[60ch] text-body-md text-muted">
-            The steps each experiment follows. Create one here or dictate it during a run. You can
-            edit or delete a protocol you created until an experiment uses it.
+          <p className="mt-xs max-w-[64ch] text-body-lg text-body">
+            The steps each experiment follows. Create one here or dictate it during a run. You can edit or delete a
+            protocol you created until an experiment uses it.
           </p>
         </div>
-        <Link href="/protocols/new" className="btn-primary">
-          <IconPlus className="h-4 w-4" /> New protocol
-        </Link>
+        <ButtonLink href="/protocols/new">
+          <IconPlus className="h-[18px] w-[18px]" /> New protocol
+        </ButtonLink>
       </header>
 
-      <div className="mt-xl grid gap-lg lg:grid-cols-[300px_minmax(0,1fr)]">
+      <div className="mt-xl grid gap-xl lg:grid-cols-[330px_minmax(0,1fr)]">
         <nav aria-label="Protocol list">
           <ul className="space-y-xs">
             {protocols.isLoading
-              ? [0, 1, 2].map((i) => <li key={i} className="skeleton h-[68px] rounded-lg" />)
+              ? [0, 1, 2].map((i) => <li key={i} className="skeleton h-[68px] rounded-card" />)
               : list.map((protocol, i) => {
                   const active = protocol.id === selected?.id;
                   return (
@@ -92,24 +96,22 @@ function ProtocolLibrary() {
                         type="button"
                         onClick={() => router.replace(`/protocols?id=${protocol.id}`, { scroll: false })}
                         aria-current={active ? 'true' : undefined}
-                        className={`flex w-full items-center gap-sm rounded-lg border p-sm text-left transition-all duration-200 ${
+                        className={`flex w-full items-center gap-sm rounded-card border px-[14px] py-[12px] text-left transition-colors duration-200 ${
                           active
-                            ? 'border-primary/35 bg-canvas shadow-panel'
-                            : 'border-transparent hover:border-hairline hover:bg-canvas/70'
+                            ? 'border-primary-border-soft bg-surface-white shadow-segment'
+                            : 'border-transparent hover:border-hairline hover:bg-surface-card'
                         }`}
                       >
-                        <span
-                          className={`grid h-9 w-9 shrink-0 place-items-center rounded-md transition-colors ${
-                            active ? 'bg-primary text-on-primary' : 'bg-surface-card text-muted'
-                          }`}
-                        >
+                        <IconTile tone={active ? 'clay' : 'muted'}>
                           <IconProtocol className="h-[18px] w-[18px]" />
-                        </span>
+                        </IconTile>
                         <span className="min-w-0">
-                          <span className="block truncate text-body-sm font-medium text-ink">{protocol.name}</span>
-                          <span className="block text-caption text-muted-soft">
-                            <span className="font-mono">{protocol.protocol_code}</span> {protocol.version} ·{' '}
-                            {protocol.steps.length} {protocol.steps.length === 1 ? 'step' : 'steps'}
+                          <span className="block truncate text-title-sm text-ink" title={protocol.name}>
+                            {protocol.name}
+                          </span>
+                          <span className="block truncate font-mono text-code text-muted">
+                            {protocol.protocol_code} {protocol.version} · {protocol.steps.length}{' '}
+                            {protocol.steps.length === 1 ? 'step' : 'steps'}
                           </span>
                         </span>
                       </button>
@@ -117,95 +119,97 @@ function ProtocolLibrary() {
                   );
                 })}
             {!protocols.isLoading && list.length === 0 && (
-              <li className="rounded-lg border border-dashed border-hairline p-md text-body-sm text-muted-soft">
-                No protocols yet. Use New protocol to write one.
-              </li>
+              <li className="info-card text-body-md text-muted">No protocols yet. Use New protocol to write one.</li>
             )}
           </ul>
         </nav>
 
         {selected && (
-          <article key={selected.id} className="card animate-slide-up overflow-hidden">
-            <header className="bloom border-b border-hairline px-lg pb-lg pt-lg">
-              <div className="flex flex-wrap items-start justify-between gap-sm">
-                <p className="eyebrow">
-                  <span className="font-mono">{selected.protocol_code}</span> · {selected.version ?? 'unversioned'}
-                  {selected.owner_id == null && <span className="ml-xs normal-case text-muted-soft">· library, read-only</span>}
+          <article
+            key={selected.id}
+            className="animate-slide-up overflow-hidden rounded-hero border border-hairline bg-surface-card"
+          >
+            <header className="bg-protocol-fade px-lg pb-lg pt-lg sm:px-[28px]">
+              <div className="flex flex-wrap items-center justify-between gap-sm">
+                <p className="font-mono text-code tracking-[0.1em] text-muted">
+                  {selected.protocol_code} · {selected.version ?? 'unversioned'}
                 </p>
-                {mine && (
+                {inUse ? (
+                  <span title="Its steps are what those runs were recorded against.">
+                    <LockPill>In use by a run — locked</LockPill>
+                  </span>
+                ) : selected.owner_id == null ? (
+                  <LockPill>Library — read-only</LockPill>
+                ) : mine ? (
                   <div className="flex gap-xs">
-                    {inUse ? (
-                      <span className="text-caption text-muted-soft" title="Its steps are what those runs were recorded against.">
-                        In use by a run, so it can no longer be edited or deleted
-                      </span>
-                    ) : (
-                      <>
-                        <Link href={`/protocols/new?edit=${selected.id}`} className="btn-secondary h-9">
-                          <IconPencil className="h-4 w-4" /> Edit
-                        </Link>
-                        <button type="button" className="btn-danger h-9" onClick={remove} disabled={deleting}>
-                          <IconTrash className="h-4 w-4" /> {deleting ? 'Deleting…' : 'Delete'}
-                        </button>
-                      </>
-                    )}
+                    <ButtonLink href={`/protocols/new?edit=${selected.id}`} variant="secondary">
+                      <IconPencil className="h-4 w-4" /> Edit
+                    </ButtonLink>
+                    <button type="button" className="btn-danger" onClick={remove} disabled={deleting}>
+                      <IconTrash className="h-4 w-4" /> {deleting ? 'Deleting…' : 'Delete'}
+                    </button>
                   </div>
-                )}
+                ) : null}
               </div>
               {actionError && (
-                <p role="alert" className="mt-xs text-body-sm text-error">
+                <p role="alert" className="mt-xs text-body-md text-danger-text">
                   {actionError}
                 </p>
               )}
-              <h2 className="mt-xs text-display-sm">{selected.name}</h2>
-              <dl className="mt-md flex flex-wrap gap-x-xl gap-y-sm text-body-sm">
+              <h2 className="mt-sm line-clamp-2 text-display-sm" title={selected.name}>
+                {selected.name}
+              </h2>
+              <dl className="mt-md flex flex-wrap gap-x-xl gap-y-sm">
                 <div>
-                  <dt className="text-caption text-muted-soft">Steps</dt>
-                  <dd className="tabular text-title-sm text-ink">{selected.steps.length}</dd>
+                  <dt className="text-caption text-body">Steps</dt>
+                  <dd className="tabular font-display text-numeral-sm text-ink">{selected.steps.length}</dd>
                 </div>
                 <div>
-                  <dt className="text-caption text-muted-soft">Runs</dt>
-                  <dd className="tabular text-title-sm text-ink">{selected.experiments?.[0]?.count ?? 0}</dd>
+                  <dt className="text-caption text-body">Runs</dt>
+                  <dd className="tabular font-display text-numeral-sm text-ink">{selected.experiments?.[0]?.count ?? 0}</dd>
                 </div>
                 <div>
-                  <dt className="text-caption text-muted-soft">Readings taken</dt>
-                  <dd className="flex flex-wrap gap-xxs pt-[2px]">
-                    {types.length ? (
-                      types.map((t) => (
-                        <span key={t} className="badge capitalize">
-                          {t}
+                  <dt className="text-caption text-body">Readings required</dt>
+                  <dd className="font-display text-numeral-sm text-ink">{types.length || 'None'}</dd>
+                  {types.length > 0 && (
+                    <dd className="mt-xxs flex flex-wrap gap-xxs">
+                      {types.map((t) => (
+                        <span key={t} className="badge">
+                          {displayName(t)}
                         </span>
-                      ))
-                    ) : (
-                      <span className="text-muted">None</span>
-                    )}
-                  </dd>
+                      ))}
+                    </dd>
+                  )}
                 </div>
               </dl>
             </header>
 
-            <div className="grid gap-xl p-lg xl:grid-cols-[minmax(0,1fr)_240px]">
-              <section aria-label="Steps">
-                <h3 className="panel-label mb-sm">Steps</h3>
+            <div className="grid border-t border-hairline md:grid-cols-[minmax(0,1fr)_260px]">
+              <section aria-label="Steps" className="p-lg sm:px-[28px]">
+                <h3 className="eyebrow mb-sm">Steps</h3>
                 <ProtocolSteps steps={selected.steps} />
               </section>
-              <section aria-label="Runs using this protocol">
-                <h3 className="panel-label mb-sm">Used by</h3>
+              <section
+                aria-label="Runs using this protocol"
+                className="border-t border-hairline p-lg md:border-l md:border-t-0"
+              >
+                <h3 className="eyebrow mb-sm">Used by</h3>
                 {runs.length ? (
-                  <ul className="space-y-xxs">
+                  <ul className="space-y-xs">
                     {runs.map((run) => (
                       <li key={run.id}>
                         <Link
-                          href={`/dashboard/experiments/${run.id}`}
-                          className="flex items-center justify-between gap-xs rounded-md px-xs py-xs transition-colors hover:bg-surface-soft"
+                          href={experimentHref(run)}
+                          className="flex h-[44px] items-center justify-between gap-xs rounded-lg border border-hairline bg-surface-white px-sm transition-colors hover:border-border-hover"
                         >
-                          <span className="font-mono text-body-sm text-ink">{run.experiment_code}</span>
-                          <StatusBadge status={run.status} />
+                          <span className="font-mono text-code text-ink">{run.experiment_code}</span>
+                          <StatusPill status={run.status} />
                         </Link>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-body-sm text-muted-soft">No runs yet.</p>
+                  <p className="text-body-md text-muted">No runs yet.</p>
                 )}
               </section>
             </div>

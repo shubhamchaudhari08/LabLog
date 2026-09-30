@@ -17,6 +17,7 @@
 import { useEffect } from 'react';
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import type { StoredRequirement } from '@/lib/api';
 
 export const OPTIMISTIC_TIMEOUT_MS = 10_000;
 
@@ -43,6 +44,11 @@ export interface ProtocolStep {
   name: string;
   required_fields?: string[];
   default_unit?: Record<string, string>;
+  /** specs/007: structured requirements and a timed step's window, when the protocol has them. */
+  requirements?: StoredRequirement[];
+  expected_duration_seconds?: number;
+  min_duration_seconds?: number;
+  max_duration_seconds?: number;
 }
 
 export const keys = {
@@ -137,6 +143,8 @@ export function useProtocolList() {
 export function useExperiment(experimentId: string) {
   return useQuery({
     queryKey: keys.experiment(experimentId),
+    // The shell's voice dock asks on every page; off a workspace there is no id.
+    enabled: Boolean(experimentId),
     queryFn: async () => {
       const { data, error } = await supabase
         .from('experiments')
@@ -242,11 +250,14 @@ export function applyOptimisticToolResult(
   data: Record<string, unknown>,
 ): void {
   if (tool === 'record_measurement') {
-    // The handler records against the experiment's current step; mirror that so
-    // the protocol rail ticks the reading off before the change stream arrives.
+    // The step the handler stamped - the current one, or an earlier step for a
+    // late reading - so the protocol rail ticks it off before the change stream arrives.
+    const stamped = (data.protocol_step as { index?: unknown } | null | undefined)?.index;
     const stepIndex =
-      client.getQueryData<{ current_step_index?: number }>(keys.experiment(experimentId))
-        ?.current_step_index ?? null;
+      typeof stamped === 'number'
+        ? stamped
+        : client.getQueryData<{ current_step_index?: number }>(keys.experiment(experimentId))
+            ?.current_step_index ?? null;
     client.setQueryData<MeasurementRow[]>(keys.measurements(experimentId), (prev = []) => [
       {
         id: String(data.measurement_id),
@@ -308,6 +319,8 @@ export function applyOptimisticToolResult(
   };
   const key = affected[tool];
   if (key) void client.invalidateQueries({ queryKey: key });
+  // specs/004: a timer the agent started or cancelled shows before the change stream lands.
+  if (tool === 'step_timer') void client.invalidateQueries({ queryKey: ['step-timer', experimentId] });
   void client.invalidateQueries({ queryKey: keys.events(experimentId) });
 }
 

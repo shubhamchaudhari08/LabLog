@@ -1,13 +1,12 @@
 import type { Metadata } from 'next';
-import { Instrument_Serif, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google';
+import { Instrument_Serif, JetBrains_Mono, Manrope } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
 
 /**
- * DESIGN.md calls for Copernicus/Tiempos display over StyreneB/Inter body.
- * Neither is licensed here, so these are the closest open substitutes:
- * Instrument Serif keeps the editorial, slightly condensed display voice, and
- * Plus Jakarta Sans is humanist rather than the default-feeling Inter.
+ * The three faces DESIGN.md names: Instrument Serif for titles, run names and
+ * big numerals (weight 400 only), Manrope for everything else, and JetBrains
+ * Mono for codes, units, timers and captured values.
  */
 const display = Instrument_Serif({
   subsets: ['latin'],
@@ -16,7 +15,7 @@ const display = Instrument_Serif({
   display: 'swap',
 });
 
-const sans = Plus_Jakarta_Sans({
+const sans = Manrope({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   variable: '--font-sans',
@@ -48,8 +47,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <a href="#main" className="skip-link">
           Skip to content
         </a>
-        {/* Fixed grain: breaks the flatness of large cream fields. */}
-        <div aria-hidden className="grain" />
         <Providers>{children}</Providers>
       </body>
     </html>

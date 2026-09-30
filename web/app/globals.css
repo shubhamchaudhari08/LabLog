@@ -2,13 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Design tokens live in tailwind.config.ts, transcribed from DESIGN.md.
-   This file holds only what Tailwind cannot express. */
+/* Design tokens live in tailwind.config.ts, transcribed from DESIGN.md
+   (v1 Warm Notebook). This file holds only what Tailwind cannot express, and
+   the shared component classes built from those tokens. */
 
 @layer base {
   :root {
     /* What the protocol rail's nodes cut out of the line behind them. */
-    --rail-bg: theme('colors.canvas');
+    --rail-bg: theme('colors.surface-rail');
+    --sidebar-w: 248px;
   }
 
   html {
@@ -18,16 +20,13 @@
   }
 
   body {
-    @apply bg-canvas text-body font-sans;
-    font-size: 16px;
-    line-height: 1.55;
+    @apply bg-canvas font-sans text-body-md text-body;
   }
 
   h1,
   h2,
   h3 {
-    @apply font-display text-ink;
-    font-weight: 400;
+    @apply font-display font-normal text-ink;
     text-wrap: balance;
   }
 
@@ -35,27 +34,26 @@
     text-wrap: pretty;
   }
 
-  /* One visible focus style everywhere, rather than none. Keyboard users are
-     the only people who ever see it, and they currently saw nothing. */
+  /* One visible focus style everywhere: the text-input-focused outline. */
   :focus-visible {
-    @apply outline-none ring-2 ring-primary/55 ring-offset-2 ring-offset-canvas;
-    border-radius: 4px;
+    outline: 2px solid theme('colors.primary-border-soft');
+    outline-offset: 2px;
+    border-radius: 6px;
   }
 
-  .panel-dark :focus-visible {
-    @apply ring-offset-surface-dark;
+  .dark-scope :focus-visible,
+  .dark-surface :focus-visible {
+    outline-color: theme('colors.primary-on-dark');
   }
 
-  /* Numbers in the measurement table must align in columns and never shift
-     width as they update — a value that jiggles as it lands undercuts the
-     precision the whole product is claiming. */
+  /* Numbers align in columns and never shift width as they update. */
   .tabular {
     font-variant-numeric: tabular-nums;
     font-feature-settings: 'tnum';
   }
 
   .skip-link {
-    @apply fixed left-md top-md z-overlay -translate-y-[200%] rounded-md bg-ink px-md py-xs text-body-sm text-on-dark transition-transform;
+    @apply fixed left-md top-md z-overlay -translate-y-[200%] rounded-lg bg-ink px-md py-xs text-body-md text-on-dark transition-transform;
   }
   .skip-link:focus {
     @apply translate-y-0;
@@ -63,56 +61,10 @@
 }
 
 @layer components {
-  /* Grain. Large flat cream fields read as unfinished; a trace of noise gives
-     the surface a material quality without becoming a visible texture. */
-  .grain {
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    opacity: 0.035;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
-  }
+  /* ---------------------------------------------------------------- page */
 
-  /* The header never scrolls away: it carries the microphone state, and a
-     live microphone must be visible from every screen. */
-  .app-header {
-    @apply sticky top-0 z-header border-b border-hairline bg-canvas/80 backdrop-blur-xl;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset;
-  }
-
-  .side-link {
-    @apply relative flex h-10 items-center gap-sm rounded-md px-sm text-[14px] font-medium text-on-dark-soft transition-all duration-200 hover:bg-white/[0.04] hover:text-on-dark;
-  }
-  .side-link:active {
-    transform: scale(0.98);
-  }
-  /* Active item: a coral edge that grows in, not a flat highlight. */
-  .side-link::before {
-    content: '';
-    @apply absolute left-0 top-1/2 h-5 w-[3px] -translate-x-sm -translate-y-1/2 scale-y-0 rounded-r-pill bg-primary transition-transform duration-300;
-  }
-  .side-link-active {
-    @apply bg-white/[0.06] text-on-dark;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  }
-  .side-link-active::before {
-    @apply scale-y-100;
-  }
-  .side-link-active svg {
-    @apply text-primary;
-  }
-
-  .icon-btn {
-    @apply grid h-9 w-9 place-items-center rounded-md text-muted transition-all duration-200 hover:bg-surface-card hover:text-ink active:scale-95;
-  }
-  .icon-btn-dark {
-    @apply grid h-8 w-8 place-items-center rounded-md text-on-dark-soft transition-all duration-200 hover:bg-white/[0.06] hover:text-on-dark active:scale-95;
-  }
-
-  /* Page body: one container rule, so screens line up with each other. */
   .page {
-    @apply mx-auto w-full max-w-[1320px] px-md pb-section pt-lg sm:px-lg lg:px-xl lg:pt-xl;
+    @apply mx-auto w-full max-w-[1280px] px-md pb-dock pt-lg sm:px-xl lg:px-page-x lg:pt-page-top;
   }
 
   .page-title {
@@ -120,101 +72,122 @@
   }
 
   .eyebrow {
-    @apply text-[12px] font-medium tracking-[1.2px] text-muted-soft;
+    @apply text-eyebrow uppercase text-muted;
   }
 
-  /* Card surface. Only used where elevation means something: an object you can
-     open or act on. Lists of facts sit on the canvas with hairlines instead. */
+  /* Section labels inside cards: the same notebook-header voice. */
+  .panel-label {
+    @apply text-eyebrow uppercase text-muted;
+  }
+
+  .link {
+    @apply text-primary-text transition-colors hover:text-primary-text-active;
+  }
+
+  /* ------------------------------------------------------------- surfaces */
+
   .card {
-    @apply relative rounded-xl border border-hairline bg-canvas shadow-panel;
+    @apply relative rounded-card border border-hairline bg-surface-card;
   }
+
+  /* Lifted: 2px and a warm shadow on hover (DESIGN.md Elevation). */
+  .card-lift,
   .card-interactive {
-    @apply transition-all duration-300 hover:-translate-y-[2px] hover:border-muted-soft/50 hover:shadow-lift;
+    @apply transition duration-[180ms] hover:-translate-y-[2px] hover:border-border-hover hover:shadow-tile-lift;
   }
+
+  .list-panel {
+    @apply overflow-hidden rounded-card border border-hairline bg-surface-card;
+  }
+
+  .list-row {
+    @apply min-h-[58px] border-b border-hairline-soft px-[18px] last:border-0;
+  }
+
+  .list-row-selected {
+    @apply bg-primary-tint-soft shadow-selected-row;
+  }
+
+  .info-card {
+    @apply rounded-panel border border-hairline bg-surface-card p-[20px];
+  }
+
+  .note-card {
+    @apply rounded-panel bg-surface-note p-[20px];
+  }
+
+  /* Dark surfaces are for listening (DESIGN.md: light = manage, dark = listen). */
+  .dark-surface {
+    @apply bg-dark-surface text-on-dark;
+    color-scheme: dark;
+  }
+
+  .dark-scope {
+    color-scheme: dark;
+  }
+
+  .skeleton {
+    @apply rounded-sm bg-surface-muted;
+  }
+
+  /* --------------------------------------------------------------- inputs */
 
   .input {
-    @apply h-10 w-full rounded-md border border-hairline bg-canvas px-sm text-body-sm text-ink transition-colors placeholder:text-muted-soft hover:border-muted-soft focus:border-primary focus:outline-none;
+    @apply h-[44px] w-full rounded-lg border border-border-strong bg-surface-white px-sm text-body-md text-ink transition-colors placeholder:text-muted hover:border-border-hover focus:outline focus:outline-2 focus:outline-primary-border-soft;
   }
 
+  .input-error {
+    @apply border-danger-text;
+  }
+
+  .input-dark {
+    @apply h-[44px] w-full rounded-lg border border-dark-border bg-dark-panel px-sm text-body-md text-on-dark placeholder:text-on-dark-muted focus:outline focus:outline-2 focus:outline-primary-on-dark;
+  }
+
+  /* Segmented tabs (the markup lives in components/ui/SegmentedTabs). */
   .tab {
-    @apply rounded-md px-sm py-[6px] text-body-sm text-muted transition-all duration-200 hover:text-ink;
+    @apply inline-flex h-[36px] items-center gap-xs rounded-[9px] px-sm text-body-md text-body transition-colors hover:text-ink;
   }
   .tab-active {
-    @apply bg-canvas text-ink shadow-panel;
-  }
-
-  /* Ambient wash behind page headers: a soft coral bloom so the top of each
-     screen has depth without becoming a gradient banner. */
-  .bloom {
-    background:
-      radial-gradient(60% 120% at 0% 0%, rgba(204, 120, 92, 0.1), transparent 60%),
-      radial-gradient(50% 90% at 100% 0%, rgba(93, 184, 166, 0.07), transparent 60%);
-  }
-
-  .panel {
-    @apply relative rounded-lg border border-hairline bg-canvas shadow-panel;
-  }
-
-  .panel-header {
-    @apply flex items-center justify-between gap-md border-b border-hairline-soft px-lg py-sm;
-  }
-
-  .panel-label {
-    @apply text-caption-upper uppercase text-muted;
-  }
-
-  /* Dark surfaces carry the product chrome — here, the live voice session.
-     The inset highlight is what stops it reading as a hole punched in the page:
-     a lit top edge implies a raised object under the same light as the panels. */
-  .panel-dark {
-    @apply relative rounded-lg bg-surface-dark text-on-dark shadow-dark;
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.3),
-      0 28px 60px -28px rgba(0, 0, 0, 0.55),
-      inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    @apply bg-surface-card text-ink shadow-segment;
   }
 
   .badge {
-    @apply inline-flex items-center rounded-sm bg-surface-card px-xs py-[3px] text-caption text-muted;
+    @apply inline-flex items-center gap-[6px] rounded-pill bg-surface-muted px-[10px] py-[4px] text-caption text-body;
   }
 
-  .badge-coral {
-    @apply inline-flex items-center rounded-sm bg-primary px-xs py-[3px] text-caption-upper uppercase text-on-primary;
-  }
+  /* -------------------------------------------------------------- buttons */
 
   .btn-primary {
-    @apply inline-flex h-10 items-center gap-xs rounded-md bg-primary px-lg text-[14px] font-medium text-on-primary shadow-panel transition-all duration-200 hover:bg-primary-active active:translate-y-px active:shadow-none disabled:bg-primary-disabled disabled:text-muted disabled:shadow-none;
+    @apply inline-flex h-[46px] items-center justify-center gap-xs rounded-lg bg-primary px-[18px] text-button text-on-primary transition-colors hover:bg-primary-active active:bg-primary-active disabled:cursor-not-allowed disabled:bg-surface-muted-strong disabled:text-muted;
+  }
+
+  .btn-primary-lg {
+    @apply h-[52px];
   }
 
   .btn-secondary {
-    @apply inline-flex h-10 items-center gap-xs rounded-md border border-hairline bg-canvas px-lg text-[14px] font-medium text-ink transition-all duration-200 hover:border-muted-soft hover:bg-surface-soft active:translate-y-px disabled:text-muted-soft;
+    @apply inline-flex h-[44px] items-center justify-center gap-xs rounded-lg border border-border-strong bg-surface-card px-[16px] text-button text-ink transition-colors hover:border-border-hover disabled:cursor-not-allowed disabled:text-muted;
   }
 
-  .btn-dark {
-    @apply inline-flex h-10 items-center gap-xs rounded-md bg-surface-dark-elevated px-lg text-[14px] font-medium text-on-dark transition-all duration-200 hover:bg-white/10 active:translate-y-px disabled:text-on-dark-soft;
+  .btn-secondary-dark {
+    @apply inline-flex h-[44px] items-center justify-center gap-xs rounded-lg border border-dark-border bg-dark-panel px-[16px] text-button text-on-dark transition-colors hover:bg-dark-raised disabled:cursor-not-allowed disabled:text-on-dark-muted;
   }
 
   .btn-ghost {
-    @apply inline-flex h-10 items-center gap-xs rounded-md px-md text-[14px] font-medium text-muted transition-all duration-200 hover:bg-surface-card hover:text-ink active:translate-y-px;
+    @apply inline-flex h-[44px] items-center justify-center gap-xs rounded-lg px-md text-button text-body transition-colors hover:bg-surface-muted hover:text-ink;
   }
 
   .btn-danger {
-    @apply inline-flex h-9 items-center gap-xs rounded-md bg-error px-md text-[13px] font-medium text-on-primary transition-all duration-200 hover:bg-error/90 active:translate-y-px;
+    @apply inline-flex h-[44px] items-center justify-center gap-xs rounded-lg bg-danger-bg px-md text-button text-danger-text transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
-  .btn-quiet {
-    @apply inline-flex h-10 items-center rounded-md px-md text-[14px] font-medium text-on-dark-soft transition-colors duration-200 hover:text-on-dark;
+  .icon-btn {
+    @apply grid h-[44px] w-[44px] place-items-center rounded-lg text-body transition-colors hover:bg-surface-muted hover:text-ink;
   }
 
-  /* Skeletons match the shape of what is loading, so the layout does not jump
-     when real rows arrive. */
-  .skeleton {
-    @apply relative overflow-hidden rounded-sm bg-surface-card;
-  }
-  .skeleton::after {
-    content: '';
-    @apply absolute inset-0 -translate-x-full animate-shimmer;
-    background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  .icon-btn-dark {
+    @apply grid h-[44px] w-[44px] shrink-0 place-items-center rounded-lg border border-dark-border bg-dark-panel text-on-dark transition-colors hover:bg-dark-raised disabled:opacity-50;
   }
 }
 

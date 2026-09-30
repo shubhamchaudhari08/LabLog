@@ -30,8 +30,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
   if (!ready)
     return (
       <div className="grid min-h-dvh place-items-center" role="status">
-        <span className="flex items-center gap-sm text-body-sm text-muted">
-          <span aria-hidden className="h-2 w-2 animate-pulse-soft rounded-pill bg-primary" />
+        <span className="flex items-center gap-sm text-body-md text-muted">
+          <span aria-hidden className="h-2 w-2 rounded-pill bg-primary" />
           Opening your notebook…
         </span>
       </div>

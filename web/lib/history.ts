@@ -33,6 +33,21 @@ export function experimentHref(e: { id: string; status: string }): string {
   return TERMINAL.has(e.status) ? `/experiments/${e.id}` : `/dashboard/experiments/${e.id}`;
 }
 
+export type OpenAction = { switchTo: { id: string; code: string } } | { navigate: string };
+
+/**
+ * What to do with search_experiments' `opened` (specs/006 contract §2). A running
+ * run hands the voice session over to recording, as resuming it does; anything
+ * else just opens its page and the no-experiment session stays live.
+ */
+export function openAction(opened: unknown): OpenAction | null {
+  if (!opened || typeof opened !== 'object') return null;
+  const { experiment_id: id, experiment_code: code, status } = opened as Record<string, unknown>;
+  if (typeof id !== 'string' || typeof status !== 'string') return null;
+  if (status === 'RUNNING') return { switchTo: { id, code: String(code ?? '') } };
+  return { navigate: experimentHref({ id, status }) };
+}
+
 export function runDate(row: HistoryRow): string | null {
   return row.started_at ?? row.created_at ?? null;
 }

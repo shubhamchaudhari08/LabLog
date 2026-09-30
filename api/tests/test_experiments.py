@@ -37,6 +37,8 @@ def events_of(sb: FakeSupabase, entity_id: str) -> list[str]:
 
 
 # -- create -----------------------------------------------------------------
+# The seeded protocol records temperature for every sample, so each run below
+# lists one: without it, creation is refused (specs/007 FR-713).
 
 
 def test_create_and_start_with_protocol(client, sb):
@@ -65,7 +67,7 @@ def test_create_and_start_with_protocol(client, sb):
 
 
 def test_create_with_protocol_without_start_is_ready(client, sb):
-    res = client.post("/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID}, headers=auth()).json()
+    res = client.post("/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID, "sample_codes": ["A1"]}, headers=auth()).json()
     assert res["experiment"]["status"] == "READY"
     assert res["experiment"].get("started_at") is None
 
@@ -81,6 +83,7 @@ def test_server_owned_fields_in_the_body_are_ignored(client, sb):
     body = {
         "name": "Trial",
         "protocol_id": PROTOCOL_ID,
+        "sample_codes": ["A1"],
         "owner_id": OTHER_USER_ID,
         "status": "COMPLETED",
         "experiment_code": "HACK-1",
@@ -97,7 +100,7 @@ def test_server_owned_fields_in_the_body_are_ignored(client, sb):
 
 def test_code_numbers_continue_past_the_highest_existing(client, sb):
     sb.rows("experiments").append({"id": "x", "experiment_code": "STAB-120", "owner_id": OTHER_USER_ID, "status": "COMPLETED"})
-    exp = client.post("/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID}, headers=auth()).json()["experiment"]
+    exp = client.post("/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID, "sample_codes": ["A1"]}, headers=auth()).json()["experiment"]
     assert exp["experiment_code"] == "STAB-121"
 
 
@@ -113,7 +116,7 @@ def test_code_collision_retries(client, sb, monkeypatch):
         return "STAB-104" if calls["n"] == 1 else real(sb_, prefix)
 
     monkeypatch.setattr(lifecycle, "next_experiment_code", stale)
-    exp = client.post("/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID}, headers=auth()).json()["experiment"]
+    exp = client.post("/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID, "sample_codes": ["A1"]}, headers=auth()).json()["experiment"]
     assert exp["experiment_code"] == "STAB-105"
     assert calls["n"] == 2
 
@@ -159,7 +162,7 @@ def test_create_requires_a_token(client, sb):
 
 
 def _ready(client) -> dict:
-    return client.post("/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID}, headers=auth()).json()["experiment"]
+    return client.post("/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID, "sample_codes": ["A1"]}, headers=auth()).json()["experiment"]
 
 
 def test_start_moves_ready_to_running(client, sb):
@@ -200,3 +203,36 @@ def test_start_missing_experiment_is_404(client, sb):
 
 def test_start_requires_a_token(client, sb):
     assert client.post(f"/experiments/{EXPERIMENT_ID}/start").status_code == 401
+
+
+# -- samples are a precondition (specs/007 FR-713, research R-721) -----------
+
+
+def test_create_without_samples_on_an_every_sample_protocol_is_refused(client, sb):
+    # The seeded protocol asks for temperature of every sample (legacy required_fields).
+    for start in (True, False):
+        before = counts(sb)
+        res = client.post(
+            "/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID, "start": start}, headers=auth()
+        ).json()
+        assert res["error"] == "SAMPLES_REQUIRED", res
+        assert res["detail"]["any_sample"] is True
+        assert "at least one sample" in res["message"]
+        assert counts(sb) == before
+
+
+def test_create_with_a_sample_is_allowed(client, sb):
+    res = client.post(
+        "/experiments", json={"name": "Trial", "protocol_id": PROTOCOL_ID, "sample_codes": ["A1"]}, headers=auth()
+    ).json()
+    assert res["success"], res
+
+
+def test_start_of_a_ready_run_without_samples_is_refused(client, sb):
+    exp = _ready(client)
+    sb.tables["samples"] = [s for s in sb.rows("samples") if s["experiment_id"] != exp["id"]]
+    before = counts(sb)
+    res = client.post(f"/experiments/{exp['id']}/start", headers=auth()).json()
+    assert res["error"] == "SAMPLES_REQUIRED"
+    assert counts(sb) == before
+    assert next(e for e in sb.rows("experiments") if e["id"] == exp["id"])["status"] == "READY"

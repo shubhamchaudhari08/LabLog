@@ -13,4 +13,4 @@ COPY app ./app
 # Deploy in the same region as Supabase and keep warm (research.md R-013):
 # a cold start lands on the first spoken measurement.
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

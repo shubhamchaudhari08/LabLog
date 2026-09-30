@@ -59,7 +59,12 @@ def test_get_active_experiment_returns_context(sb, experiment):
 # T060 â€” record_measurement, happy path
 # ---------------------------------------------------------------------------
 def test_record_measurement_writes_row_and_event(sb, experiment):
-    result = record(sb, experiment, raw_spoken_value="A seventeen is four point two Celsius")
+    # The transcript arrives in the /tools envelope, not in the model's args.
+    result = handlers.record_measurement(
+        sb=sb, experiment=experiment, user_id=OWNER_ID, session_id="sess-test",
+        args=RecordMeasurementArgs(sample_code="A17", measurement_type="temperature", value=4.2, unit="C"),
+        utterance="A seventeen is four point two Celsius",
+    )
     assert result["success"] is True
 
     assert sb.count("measurements") == 1
@@ -271,7 +276,8 @@ def test_step_index_is_clamped_not_overrun(sb, experiment):
 
 
 def test_completing_a_step_advances_by_one(sb, experiment):
-    call(handlers.complete_protocol_step, sb, experiment, CompleteProtocolStepArgs())
+    # No temperatures recorded: the user said to move on anyway (the step gate).
+    call(handlers.complete_protocol_step, sb, experiment, CompleteProtocolStepArgs(confirmed_incomplete=True))
     assert sb.rows("experiments")[0]["current_step_index"] == 2
     assert sb.rows("events")[0]["event_type"] == "PROTOCOL_STEP_COMPLETED"
 
@@ -302,8 +308,11 @@ def test_completeness_lists_what_is_missing_per_sample(sb, experiment):
     result = call(handlers.check_experiment_completeness, sb, experiment, NoArgs())
     assert result["data"]["complete"] is False
     missing = result["data"]["missing"]
-    step1 = next(m for m in missing if m["step_index"] == 1)
-    assert set(step1["samples"]) == {"A18", "CONTROL-01"}
+    # specs/007: one item per missing (step, sample, requirement).
+    assert {m["sample_code"] for m in missing if m["step_index"] == 1} == {"A18", "CONTROL-01"}
+    # A17's step-1 reading does not satisfy step 3, which asks for temperature too.
+    assert {m["sample_code"] for m in missing if m["step_index"] == 3} == {"A17", "A18", "CONTROL-01"}
+    assert all(m["measurement_type"] == "temperature" for m in missing)
 
 
 def test_complete_requires_explicit_confirmation(sb, experiment):
@@ -470,7 +479,7 @@ def test_step_can_be_reworded_and_rescoped_without_moving_the_user(sb, experimen
         sb,
         experiment,
         WriteProtocolStepArgs(
-            step_index=0, name="Record initial temperature", required_fields=["temperature"]
+            step_number=1, name="Record initial temperature", required_fields=["temperature"]
         ),
     )
 
@@ -490,7 +499,7 @@ def test_step_can_be_removed_and_the_rest_renumbered(sb, experiment):
         call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name=name))
 
     result = call(
-        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_index=1, remove=True)
+        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_number=2, remove=True)
     )
 
     assert result["data"]["action"] == "removed"
@@ -512,7 +521,7 @@ def test_step_with_data_recorded_against_it_cannot_be_removed(sb, experiment):
     record(sb, experiment)
 
     result = call(
-        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_index=0, remove=True)
+        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_number=1, remove=True)
     )
 
     # Renumbering would re-attribute a stored measurement to another step.
@@ -523,7 +532,7 @@ def test_step_with_data_recorded_against_it_cannot_be_removed(sb, experiment):
         handlers.write_protocol_step,
         sb,
         experiment,
-        WriteProtocolStepArgs(step_index=0, name="Record temperature at t0"),
+        WriteProtocolStepArgs(step_number=1, name="Record temperature at t0"),
     )
     assert reword["success"] is True
 
@@ -550,7 +559,20 @@ def test_unknown_step_index_is_rejected(sb, experiment):
     experiment["protocol_id"] = None
     call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name="Only step"))
     result = call(
-        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_index=4, name="Nope")
+        handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_number=5, name="Nope")
     )
     assert result["error"] == "STEP_NOT_FOUND"
+    assert result["message"] == "There's no step 5; the protocol has 1."
     assert len(sb.rows("protocols")[-1]["steps"]) == 1
+
+
+def test_step_numbers_are_taken_as_spoken(sb, experiment):
+    # voice-agent-stuck-actions: "reword step 2" passes 2, the number the user
+    # said; the handler maps it to index 1. Step 0 does not exist when spoken.
+    experiment["protocol_id"] = None
+    for name in ("Step one", "Step two"):
+        call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(name=name))
+    call(handlers.write_protocol_step, sb, experiment, WriteProtocolStepArgs(step_number=2, name="Second"))
+    assert [s["name"] for s in sb.rows("protocols")[-1]["steps"]] == ["Step one", "Second"]
+    with pytest.raises(Exception):
+        WriteProtocolStepArgs(step_number=0, name="Nope")

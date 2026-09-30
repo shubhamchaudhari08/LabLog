@@ -12,8 +12,10 @@ half-measured number (specs/003-post-mvp-features/contracts/eval-runs.md).
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
+import re
 import subprocess
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -29,7 +31,7 @@ from app.resolve import readable_protocols, resolve_experiment
 from app.tools.models import MUTATING_TOOLS, TOOL_REGISTRY, TOOL_SCOPE
 from app.tools.prompt import build_desk_prompt, build_prompt
 from app.tools.schemas import TOOL_SCHEMAS, tool_schemas
-from tests.conftest import OWNER_ID, seeded_store
+from tests.conftest import OWNER_ID, PROTOCOL_STEPS, seed_history, seeded_store
 
 from .scenarios import SCENARIOS
 
@@ -53,7 +55,7 @@ OUT = PUBLIC / "metrics.json"
 HISTORY_KEYS = ("run_id", "generated_at", "git_sha", "model", "scenario_count", "metrics", "by_category")
 
 
-def execute(sb, experiment, name, args):
+def execute(sb, experiment, name, args, tz="UTC"):
     """What POST /tools does after auth — same registry, same models, same handlers."""
     if name not in TOOL_REGISTRY:
         return {"success": False, "error": "UNKNOWN_TOOL"}
@@ -72,7 +74,10 @@ def execute(sb, experiment, name, args):
         experiment = found["experiment"]
     if scope == "user":
         experiment = None
-    return getattr(handlers, name)(sb=sb, experiment=experiment, user_id=OWNER_ID, args=parsed, session_id="eval")
+    handler = getattr(handlers, name)
+    # tz only for handlers that declare it, as the dispatcher does (specs/006 contract §1).
+    extra = {"tz": tz} if "tz" in inspect.signature(handler).parameters else {}
+    return handler(sb=sb, experiment=experiment, user_id=OWNER_ID, args=parsed, session_id="eval", **extra)
 
 
 def session_for(sb, profile):
@@ -82,8 +87,19 @@ def session_for(sb, profile):
         prompt = build_desk_prompt(readable_protocols(sb, OWNER_ID), open_runs)
         return None, prompt, gateway_tools(tool_schemas("desk")), []
     experiment = sb.rows("experiments")[0]
-    ctx = ExperimentContext(experiment=experiment, protocol=sb.rows("protocols")[0], samples=sb.rows("samples"))
-    return experiment, build_prompt(ctx), GATEWAY_TOOLS, OPENING
+    protocol = sb.rows("protocols")[0]
+    ctx = ExperimentContext(experiment=experiment, protocol=protocol, samples=sb.rows("samples"))
+    return experiment, build_prompt(ctx), GATEWAY_TOOLS, _opening(experiment, protocol)
+
+
+def _opening(experiment, protocol):
+    """The fixed MVP opening, unless a scenario moved the run (specs/004 `steps` / `at_step`)."""
+    steps, index = protocol.get("steps") or [], experiment.get("current_step_index", 0)
+    if steps is PROTOCOL_STEPS and index == 1:
+        return OPENING
+    step = steps[index] if 0 <= index < len(steps) else None
+    where = f" Step {index + 1} of {len(steps)}: {step['name']}." if step else ""
+    return [OPENING[0], {"role": "assistant", "content": f"STAB-104 is running.{where}"}]
 
 
 def converse(model, key, scenario):
@@ -91,6 +107,14 @@ def converse(model, key, scenario):
     # validation layer, not Postgres. Point at a disposable Supabase experiment
     # if database-level behaviour ever needs measuring too.
     sb = seeded_store()
+    if scenario.get("history_runs"):  # specs/006: previous runs to search and compare
+        seed_history(sb)
+    # specs/004: a scenario may run against other protocol steps or another
+    # current step. Applied before session_for so the prompt reflects it.
+    if scenario.get("steps"):
+        sb.rows("protocols")[0]["steps"] = scenario["steps"]
+    if "at_step" in scenario:
+        sb.rows("experiments")[0]["current_step_index"] = scenario["at_step"]
     experiment, prompt, tools, opening = session_for(sb, scenario.get("profile", "bench"))
     for name, args in scenario.get("setup", []):
         execute(sb, experiment, name, args)
@@ -142,7 +166,9 @@ def _matches(expected, name, calls):
     """Compare against STORED values (result data wins over raw arguments)."""
     for called, args, result in calls:
         if called == name and result.get("success"):
-            stored = {**args, **(result.get("data") or {})}
+            data = result.get("data") or {}
+            # A timer result nests the stored timer (specs/004 contracts/tools-step-timer.md).
+            stored = {**args, **data, **(data.get("timer") or {})}
             if all(_norm(stored.get(k)) == _norm(v) for k, v in expected.items()):
                 return True
     return False
@@ -157,9 +183,16 @@ def _expected(expect):
     return []
 
 
+def _is_write(name, args, result):
+    """A successful mutating call. step_timer status is a read (specs/004 T037)."""
+    if name == "step_timer" and (args or {}).get("action") == "status":
+        return False
+    return name in MUTATING_TOOLS and bool(result.get("success"))
+
+
 def score(scenario, calls, text):
     expect = scenario["expect"]
-    writes = [name for name, _, result in calls if name in MUTATING_TOOLS and result.get("success")]
+    writes = [name for name, args, result in calls if _is_write(name, args, result)]
     wanted = _expected(expect)
 
     if wanted:
@@ -203,9 +236,63 @@ def score(scenario, calls, text):
             result for name, _, result in calls if name == "record_measurement"
         ]
         r["backend_ok"] = any(x.get("error") == expect["error"] for x in attempted) if attempted else None
+    if "offer" in expect:
+        # specs/004 FR-309: did the agent offer a timer, and start nothing? ("timed"
+        # does not contain "timer", so "that step is timed" is not an offer.)
+        started = any(
+            name == "step_timer" and (args or {}).get("action") == "start" and result.get("success")
+            for name, args, result in calls
+        )
+        r["offer_ok"] = ("timer" in text.lower()) == expect["offer"] and not (expect["offer"] and started)
 
-    r["passed"] = selected and r["args_ok"] is not False and not false_record and not r["hallucination"]
+    if "spoken" in expect:
+        # specs/006 SC-401: the reply says what was expected, and every number in it
+        # came from the backend's comparison, not from the model's arithmetic.
+        comparison = next(
+            (res["data"]["comparison"] for name, _, res in reversed(calls)
+             if name == "get_sample_history" and res.get("success") and "comparison" in res.get("data", {})),
+            None,
+        )
+        r["spoken_ok"] = all(word.lower() in text.lower() for word in expect["spoken"])
+        r["numbers_ok"] = comparison is not None and set(_spoken_numbers(text)) <= _allowed_numbers(comparison)
+
+    r["passed"] = (
+        selected
+        and r["args_ok"] is not False
+        and not false_record
+        and not r["hallucination"]
+        and r.get("offer_ok") is not False
+        and r.get("spoken_ok") is not False
+        and r.get("numbers_ok") is not False
+    )
     return r
+
+
+# ponytail: regex number check; an LLM judge if phrasing drifts. The lookarounds
+# skip digits inside codes (A17, STAB-102, CONTROL-01).
+_NUMBER = re.compile(r"(?<![\w.-])\d+(?:\.\d+)?(?![\w-])")
+
+
+def _spoken_numbers(text):
+    return [n.rstrip("0").rstrip(".") if "." in n else n for n in _NUMBER.findall(text)]
+
+
+def _allowed_numbers(comparison):
+    values = [comparison.get(k) for k in ("current", "previous", "magnitude")]
+    values.append(abs(comparison["pct"]) if comparison.get("pct") is not None else None)
+    for key in ("current_step", "previous_step"):
+        if comparison.get(key):
+            values.append(comparison[key]["index"] + 1)
+    allowed = set()
+    for v in values:
+        if v is not None:
+            text = f"{v:g}" if isinstance(v, float) else str(v)
+            allowed.add(text)
+    return allowed
+
+
+# Categories added after the baseline, left out of by_profile so it stays comparable.
+NEW_CATEGORIES = ("timer", "search", "comparison")
 
 
 def _rate(flags, lower_is_better=False):
@@ -251,9 +338,25 @@ def aggregate(results, model):
             "task_completion_rate": _rate(col("passed")),
             "unit_accuracy": _rate(col("unit_ok")),
             "entity_accuracy": _rate(col("entity_ok")),
+            # specs/006 SC-401: said the expected words, and only the backend's numbers.
+            "comparison_exactness": _rate(
+                [r.get("spoken_ok") is not False and r.get("numbers_ok") is not False
+                 for sc, r, _, _ in results if sc["category"] == "comparison"]
+            ),
         },
         "by_category": dict(by_cat),
         "profile_counts": dict(profiles),
+        # Constitution amendment A-1: a grown profile's own selection accuracy must
+        # not drop. Timer scenarios are excluded so the figure covers the same
+        # scenario set as runs before specs/004 (T012a); specs/006's search and
+        # comparison likewise, reported under by_category instead.
+        "by_profile": {
+            profile: _rate(
+                [r["selected"] for sc, r, _, _ in results
+                 if sc.get("profile", "bench") == profile and sc["category"] not in NEW_CATEGORIES]
+            )
+            for profile in profiles
+        },
         "failures": [
             {
                 "scenario_id": sc["id"],

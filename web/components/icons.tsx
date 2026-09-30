@@ -176,6 +176,34 @@ export const IconArrow = (p: IconProps) => (
   </Icon>
 );
 
+export const IconLock = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4.5" y="9" width="11" height="8" rx="1.5" />
+    <path d="M7 9V6.5a3 3 0 0 1 6 0V9" />
+  </Icon>
+);
+
+export const IconPause = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M7.5 5v10M12.5 5v10" />
+  </Icon>
+);
+
+/** Leave a full-screen mode: a door with an arrow out of it. */
+export const IconExit = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M11 4H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h6" />
+    <path d="M13.5 7l3 3-3 3M16.5 10H8.5" />
+  </Icon>
+);
+
+export const IconSearch = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="9" cy="9" r="5" />
+    <path d="M13 13l3.5 3.5" />
+  </Icon>
+);
+
 export const IconSample = (p: IconProps) => (
   <Icon {...p}>
     <path d="M7 3h6M8 3v11a2 2 0 0 0 4 0V3" />

@@ -19,6 +19,7 @@ import { Ledger, toEntries } from '@/components/workspace/Ledger';
 import { ExperimentTimeline } from '@/components/workspace/Timeline';
 import { StatusBadge } from '@/components/workspace/StatusBadge';
 import { IconArrow } from '@/components/icons';
+import { LockPill } from '@/components/ui/bits';
 import {
   useDeviations,
   useEvents,
@@ -43,11 +44,15 @@ function duration(from?: string | null, to?: string | null) {
   return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
-function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+function Stat({ label, value, numeral = false }: { label: string; value: React.ReactNode; numeral?: boolean }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[12px] text-muted-soft">{label}</dt>
-      <dd className="tabular mt-[2px] truncate text-title-sm text-ink">{value}</dd>
+      <dt className="text-caption text-body">{label}</dt>
+      <dd
+        className={`tabular mt-[2px] truncate text-ink ${numeral ? 'font-display text-numeral-sm' : 'pt-[6px] text-title-sm'}`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
@@ -99,7 +104,7 @@ export default function ExperimentRecord() {
         <div className="flex flex-wrap items-center gap-sm">
           <StatusBadge status={status} />
           <span className="font-mono text-caption text-muted">{code}</span>
-          <span className="badge">Read-only record</span>
+          <LockPill>Read-only record</LockPill>
         </div>
         {experiment.isLoading ? (
           <div className="skeleton mt-sm h-12 w-2/3" />
@@ -116,11 +121,12 @@ export default function ExperimentRecord() {
           <Stat label="Started" value={stamp(data?.started_at)} />
           <Stat label={completed ? 'Completed' : 'Ended'} value={stamp(data?.completed_at)} />
           <Stat label="Duration" value={duration(data?.started_at, data?.completed_at)} />
-          <Stat label="Readings" value={measurements.data?.length ?? '—'} />
+          <Stat label="Readings" value={measurements.data?.length ?? '—'} numeral />
           <Stat
             label="Deviations"
+            numeral
             value={
-              <span className={deviations.data?.length ? 'text-warning' : undefined}>{deviations.data?.length ?? '—'}</span>
+              <span className={deviations.data?.length ? 'text-deviation-text' : undefined}>{deviations.data?.length ?? '—'}</span>
             }
           />
         </dl>
@@ -131,8 +137,11 @@ export default function ExperimentRecord() {
         )}
 
         {LIVE.has(status) && (
-          <Link href={`/dashboard/experiments/${experimentId}`} className="btn-primary mt-md inline-flex">
-            Open at the bench
+          <Link
+            href={status === 'RUNNING' ? `/dashboard/experiments/${experimentId}/bench` : `/dashboard/experiments/${experimentId}`}
+            className="btn-primary mt-md inline-flex"
+          >
+            {status === 'RUNNING' ? 'Open at the bench' : 'Open workspace'}
             <IconArrow className="h-4 w-4" />
           </Link>
         )}
@@ -140,10 +149,10 @@ export default function ExperimentRecord() {
 
       <section className="mt-xl" aria-labelledby="samples-heading">
         <div className="flex items-baseline justify-between border-b border-hairline pb-xs">
-          <h2 id="samples-heading" className="panel-label">
+          <h2 id="samples-heading" className="eyebrow">
             Samples
           </h2>
-          <span className="text-caption text-muted-soft">latest reading per sample</span>
+          <span className="text-caption text-muted">latest reading per sample</span>
         </div>
         <div className="pt-md">
           <SampleBoard
@@ -160,11 +169,12 @@ export default function ExperimentRecord() {
         <ExperimentTimeline events={events.data ?? []} />
       </div>
 
-      <section className="card mt-xxl overflow-hidden" aria-labelledby="protocol-heading">
-        <header className="border-b border-hairline px-lg py-md">
-          <h2 id="protocol-heading" className="text-title-md text-ink">
+      <section className="mt-xxl overflow-hidden rounded-hero border border-hairline bg-surface-card" aria-labelledby="protocol-heading">
+        <header className="border-b border-hairline bg-protocol-fade px-lg py-md sm:px-[28px]">
+          <p className="eyebrow">Protocol</p>
+          <h2 id="protocol-heading" className="mt-xxs font-display text-display-sm text-ink">
             {protocol?.name ?? 'No protocol'}
-            {protocol?.version && <span className="ml-xs text-caption text-muted-soft">{protocol.version}</span>}
+            {protocol?.version && <span className="ml-xs text-caption text-muted">{protocol.version}</span>}
           </h2>
         </header>
         <div className="px-md py-sm">
@@ -181,7 +191,7 @@ export default function ExperimentRecord() {
               readOnly
             />
           ) : (
-            <p className="px-sm py-md text-body-sm text-muted">This run had no protocol attached.</p>
+            <p className="px-sm py-md text-body-md text-muted">This run had no protocol attached.</p>
           )}
         </div>
       </section>

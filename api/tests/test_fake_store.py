@@ -2,7 +2,7 @@
 
 import pytest
 
-from tests.conftest import FakeSupabase, UniqueViolation
+from tests.conftest import FakeSupabase, UniqueViolation, seed_history, seeded_store
 
 
 @pytest.fixture
@@ -57,3 +57,10 @@ def test_unique_violation_on_sample_per_experiment():
     s.table("samples").insert({"experiment_id": "e2", "sample_code": "B3"}).execute()
     with pytest.raises(UniqueViolation):
         s.table("samples").insert({"experiment_id": "e1", "sample_code": "B3"}).execute()
+
+
+def test_seed_history_mirrors_the_sql_seed():
+    # specs/006 T007: STAB-102's A17 is 4.4 at step 1 and 4.6 at step 3 (supabase/seed.sql).
+    sb = seed_history(seeded_store())
+    values = {m["value"] for m in sb.rows("measurements") if m["sample_id"] == "hist-2-A17"}
+    assert values == {4.4, 4.6}

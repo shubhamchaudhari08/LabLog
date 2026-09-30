@@ -11,6 +11,7 @@ postgrest-py chaining API for the handlers to run unmodified.
 
 from __future__ import annotations
 
+import copy
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -198,6 +199,8 @@ class FakeSupabase:
     unique: dict[str, list[tuple[str, ...]]] = {
         "experiments": [("experiment_code",)],
         "samples": [("experiment_id", "sample_code")],
+        # 0003_step_scoped_completeness.sql: partial, WHERE source_key IS NOT NULL.
+        "deviations": [("experiment_id", "source_key")],
     }
 
     def __init__(self) -> None:
@@ -206,6 +209,8 @@ class FakeSupabase:
     def _check_unique(self, table: str, payload: dict[str, Any], rows: list[dict[str, Any]]) -> None:
         for columns in self.unique.get(table, []):
             key = tuple(payload.get(c) for c in columns)
+            if None in key:  # Postgres: NULLs never collide in a unique index
+                continue
             if any(tuple(r.get(c) for c in columns) == key for r in rows):
                 raise UniqueViolation(
                     f'duplicate key value violates unique constraint "{table}_{"_".join(columns)}_key"'
@@ -242,6 +247,68 @@ PROTOCOL_STEPS = [
     {"index": 4, "id": "observation", "name": "Add visual observation", "required_fields": []},
     {"index": 5, "id": "complete", "name": "Complete evaluation", "required_fields": []},
 ]
+
+# specs/004-step-timers: PROTOCOL_STEPS with one timed step (index 2) and one
+# range step (index 4). Everything else is unchanged.
+TIMED_STEPS = [
+    *PROTOCOL_STEPS[:2],
+    {"index": 2, "id": "spin", "name": "Centrifuge at 4,000 rpm for 10 minutes", "required_fields": []},
+    PROTOCOL_STEPS[3],
+    {"index": 4, "id": "incubate", "name": "Incubate 10-15 min", "required_fields": []},
+    PROTOCOL_STEPS[5],
+]
+
+
+def _reading_step(index, code, name, measurement_type, *, unit=None, low=None, high=None):
+    """A structured measurement step. `required_fields`/`default_unit` are kept too,
+    so the web's step view (which reads them) shows the reading."""
+    requirement = {"type": "measurement", "measurement_type": measurement_type, "scope": "all_samples", "min": low, "max": high}
+    if unit:
+        requirement["unit"] = unit
+    step = {"index": index, "id": code, "name": name, "required_fields": ["sample_id", measurement_type], "requirements": [requirement]}
+    if unit:
+        step["default_unit"] = {measurement_type: unit}
+    return step
+
+
+# specs/007: "Sample Stability Evaluation v1.0", mirrored by supabase/seed.sql.
+STABILITY_STEPS = [
+    {
+        "index": 0, "id": "REGISTER_SAMPLES", "name": "Register samples", "required_fields": [],
+        "requirements": [
+            {"type": "samples", "sample_type": "test", "count": 2},
+            {"type": "samples", "sample_type": "control", "count": 1},
+        ],
+    },
+    _reading_step(1, "INITIAL_TEMP", "Record initial temperature", "temperature", unit="C", low=2, high=8),
+    _reading_step(2, "INITIAL_PH", "Record initial pH", "pH", low=6.5, high=7.5),
+    {"index": 3, "id": "INITIAL_APPEARANCE", "name": "Record initial appearance", "required_fields": [],
+     "requirements": [{"type": "observation", "scope": "all_samples"}]},
+    {"index": 4, "id": "START_HOLD", "name": "Start stability hold", "required_fields": []},
+    {
+        "index": 5, "id": "STABILITY_HOLD", "name": "Stability hold", "required_fields": [],
+        "expected_duration_seconds": 900, "min_duration_seconds": 840, "max_duration_seconds": 1020,
+        "requirements": [{"type": "step_execution", "must_start": True, "must_complete": True}],
+    },
+    _reading_step(6, "FINAL_TEMP", "Record final temperature", "temperature", unit="C", low=2, high=8),
+    _reading_step(7, "FINAL_PH", "Record final pH", "pH", low=6.5, high=7.5),
+    {"index": 8, "id": "FINAL_APPEARANCE", "name": "Record final appearance", "required_fields": [],
+     "requirements": [{"type": "observation", "scope": "all_samples"}]},
+    {"index": 9, "id": "REVIEW_DEVIATIONS", "name": "Review deviations", "required_fields": [],
+     "requirements": [{"type": "deviation_review"}]},
+    {"index": 10, "id": "COMPLETE", "name": "Complete experiment", "required_fields": []},
+]
+
+
+def stability_store() -> FakeSupabase:
+    """STAB-104 on Sample Stability Evaluation v1.0 at step 2 (index 1); A17, A18 test, CONTROL-01 control."""
+    store = seeded_store()
+    protocol = store.rows("protocols")[0]
+    protocol.update(steps=copy.deepcopy(STABILITY_STEPS), version="v1.0")  # tests may edit their copy
+    for sample in store.rows("samples"):
+        if sample["sample_type"] == "experimental":
+            sample["sample_type"] = "test"
+    return store
 
 
 def seeded_store() -> FakeSupabase:
@@ -303,6 +370,60 @@ def seeded_store() -> FakeSupabase:
     store.tables["deviations"] = []
     store.tables["events"] = []
     return store
+
+
+def seed_history(sb: FakeSupabase) -> FakeSupabase:
+    """STAB-100..102 COMPLETED on the same protocol, as supabase/seed.sql:88-125 (specs/006).
+
+    Plain function, so eval/run.py can seed the same history. Values are rounded:
+    4.2 + 0.4 is 4.6000000000000005 in float, which a real numeric column never stores.
+    """
+    now = datetime.now(timezone.utc)
+    for i in range(3):
+        exp_id = f"hist-{i}"
+        started = now - timedelta(days=14 - i * 4)
+        sb.tables["experiments"].append(
+            {
+                "id": exp_id,
+                "experiment_code": f"STAB-10{i}",
+                "name": f"Sample Stability Evaluation Run 10{i}",
+                "protocol_id": PROTOCOL_ID,
+                "owner_id": OWNER_ID,
+                "status": "COMPLETED",
+                "current_step_index": 5,
+                "created_at": started.isoformat(),
+                "started_at": started.isoformat(),
+                "completed_at": (started + timedelta(minutes=52)).isoformat(),
+            }
+        )
+        for code in ("A17", "A18", "CONTROL-01"):
+            sample_id = f"hist-{i}-{code}"
+            sb.tables["samples"].append(
+                {
+                    "id": sample_id,
+                    "experiment_id": exp_id,
+                    "sample_code": code,
+                    "sample_type": "control" if code == "CONTROL-01" else "experimental",
+                    "status": "active",
+                }
+            )
+            base = 4.0 if code == "CONTROL-01" else 4.0 + i * 0.1
+            for offset, step, minutes in ((0.2, 1, 12), (0.4, 3, 38)):
+                sb.tables["measurements"].append(
+                    {
+                        "id": f"{sample_id}-s{step}",
+                        "experiment_id": exp_id,
+                        "sample_id": sample_id,
+                        "measurement_type": "temperature",
+                        "value": round(base + offset, 1),
+                        "unit": "C",
+                        "protocol_step_index": step,
+                        "superseded_by": None,
+                        "created_by": OWNER_ID,
+                        "recorded_at": (started + timedelta(minutes=minutes)).isoformat(),
+                    }
+                )
+    return sb
 
 
 @pytest.fixture

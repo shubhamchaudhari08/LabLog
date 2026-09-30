@@ -39,13 +39,39 @@ export interface ToolRequest {
   /** null in a desk session: no experiment is open yet. */
   experiment_id: string | null;
   session_id: string | null;
+  /** Browser IANA zone; only groups dates in search (specs/006). */
+  tz?: string | null;
+  /**
+   * The user's last committed transcript, stored as a reading's raw_spoken_value.
+   * Sent here, not in args, so the model never has to repeat the user's words
+   * (a call carrying words the user did not say is dropped by the voice agent).
+   */
+  utterance?: string | null;
 }
 
+/**
+ * Half the tools' timeout_seconds (30). Every tool holds, and a holding agent
+ * ignores the user until it gets a result, so a hung request must end in a
+ * transport error the agent can relay rather than in silence (specs/007 R-714).
+ */
+export const TOOL_TIMEOUT_MS = 15_000;
+
 export async function callTool(request: ToolRequest): Promise<ToolOutcome> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS);
+  try {
+    return await postTool(request, controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function postTool(request: ToolRequest, signal: AbortSignal): Promise<ToolOutcome> {
   const response = await fetch(`${env.apiUrl}/tools`, {
     method: 'POST',
     headers: await authHeaders(),
     body: JSON.stringify(request),
+    signal,
   });
 
   // Tool-level failures come back as HTTP 200 with success:false — they are
@@ -101,11 +127,33 @@ export async function fetchMeasurementTypes(): Promise<MeasurementType[]> {
 // specs/002). Failures come back as HTTP 200 with success:false, like /tools.
 // ---------------------------------------------------------------------------
 
+/** A stored step requirement (api/app/tools/requirements.py), discriminated by `type`. */
+export interface StoredRequirement {
+  type: string;
+  [field: string]: unknown;
+}
+
+/** One exact value, or a range open at either end (specs/007). */
+export interface ReadingPayload {
+  type: string;
+  unit?: string;
+  exact?: number;
+  min?: number;
+  max?: number;
+}
+
 export interface ProtocolDraft {
   protocol_code: string;
   name: string;
   version: string;
-  steps: { name: string; readings: { type: string; unit?: string }[] }[];
+  steps: {
+    name: string;
+    readings: ReadingPayload[];
+    requirements?: StoredRequirement[];
+    expected_duration_seconds?: number;
+    min_duration_seconds?: number;
+    max_duration_seconds?: number;
+  }[];
 }
 
 export type CreateProtocolResult =
@@ -143,7 +191,10 @@ export interface ExperimentDraft {
   name: string;
   description?: string;
   protocol_id?: string;
-  sample_codes: string[];
+  /** Codes alone; the server stores them with its default type, as before. */
+  sample_codes?: string[];
+  /** Codes with types (specs/007). Sent instead of sample_codes when any type is chosen. */
+  samples?: { code: string; sample_type?: string }[];
   start: boolean;
 }
 

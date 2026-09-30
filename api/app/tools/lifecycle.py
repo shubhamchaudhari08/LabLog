@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import lifecycle
+from .. import lifecycle, search
 from ..db import load_protocol
 from ..resolve import readable_protocols, resolve_protocol
-from ..samples import validate_sample_codes
+from ..samples import DEFAULT_SAMPLE_TYPE, validate_samples
 from .handlers import _err, _ok
-from .models import CreateExperimentArgs, NoArgs, StartExperimentArgs
+from .models import CreateExperimentArgs, NoArgs, SearchExperimentsArgs, StartExperimentArgs
 
 LIST_CAP = 25
 
@@ -37,6 +37,11 @@ def list_protocols(*, sb, experiment, user_id, args: NoArgs, session_id=None):
     return _ok(protocols=[_brief(p) for p in rows[:LIST_CAP]], truncated=len(rows) > LIST_CAP)
 
 
+def search_experiments(*, sb, experiment, user_id, args: SearchExperimentsArgs, session_id=None, tz=None):
+    """Read-only. tz comes from the /tools envelope, never from args (specs/006 contract §1)."""
+    return _ok(**search.search_experiments(sb, user_id, args, tz))
+
+
 def create_experiment(*, sb, experiment, user_id, args: CreateExperimentArgs, session_id=None):
     name = " ".join(args.name.split())
     if not name:
@@ -49,7 +54,20 @@ def create_experiment(*, sb, experiment, user_id, args: CreateExperimentArgs, se
             return _err(found["error"], found["message"], **found["detail"])
         protocol = found["protocol"]
 
-    codes, problem = validate_sample_codes(args.sample_codes or [])
+    # Types come from which list the user's words put a code in (data-model §8);
+    # the same validator as the form then checks codes, types and duplicates.
+    specs = (
+        [{"code": c, "sample_type": "test"} for c in args.test_samples or []]
+        + [{"code": c, "sample_type": "control"} for c in args.control_samples or []]
+        + [{"code": c} for c in args.sample_codes or []]
+    )
+    codes, types, problem = validate_samples(specs)
+    if problem:
+        return _err(problem["error"], problem["message"], **problem["detail"])
+    listed = [{"code": c, "sample_type": types.get(c, DEFAULT_SAMPLE_TYPE)} for c in codes]
+    # Before the read-back: the agent asks for missing samples rather than reading
+    # back a run that could never be completed (specs/007 FR-713).
+    problem = lifecycle.sample_shortfall(protocol, listed)
     if problem:
         return _err(problem["error"], problem["message"], **problem["detail"])
 
@@ -61,6 +79,7 @@ def create_experiment(*, sb, experiment, user_id, args: CreateExperimentArgs, se
             name=name,
             protocol=_brief(protocol),
             sample_codes=codes,
+            samples=listed,
             will_start=will_start,
         )
 
@@ -74,6 +93,7 @@ def create_experiment(*, sb, experiment, user_id, args: CreateExperimentArgs, se
             sample_codes=codes,
             session_id=session_id,
             source="voice",
+            sample_types=types,
         )
     except lifecycle.CodeUnavailable:
         return _err("CODE_UNAVAILABLE", "I couldn't allocate an experiment code. Please try again.")
@@ -88,6 +108,7 @@ def create_experiment(*, sb, experiment, user_id, args: CreateExperimentArgs, se
         status=created["status"],
         protocol=_brief(protocol),
         sample_codes=[s["sample_code"] for s in samples],
+        samples=[{"code": s["sample_code"], "sample_type": s.get("sample_type")} for s in samples],
         needs_protocol=protocol is None,
     )
 
@@ -114,7 +135,7 @@ def start_experiment(*, sb, experiment, user_id, args: StartExperimentArgs, sess
     if experiment.get("status") == "RUNNING":
         return body(experiment, already_running=True)
 
-    problem = lifecycle.start_error(experiment)
+    problem = lifecycle.start_error(sb, experiment)
     if problem:
         return _err(problem["error"], problem["message"], **problem.get("detail", {}))
 

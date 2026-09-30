@@ -1,16 +1,12 @@
 'use client';
 
 /**
- * The frame every signed-in screen sits in: a dark navigation rail on the left
- * and a header that never scrolls away.
+ * The frame every signed-in screen sits in (DESIGN.md sidebar, top-header):
+ * an espresso sidebar on the left and a 68px header that never scrolls away.
  *
- * The rail is dark for the same reason the voice dock is — DESIGN.md reserves
- * dark surfaces for product chrome, and navigation is chrome. The cream field
- * to its right is left for the record itself.
- *
- * The header carries the one thing that must be visible from every screen: the
- * state of the microphone. A session left running on another page is a live
- * microphone the user has forgotten about.
+ * The sidebar carries the agent status card, and the header carries Start
+ * voice: a session left running on another page is a live microphone the
+ * user has forgotten about, so its state is visible from every screen.
  */
 
 import { createContext, useContext, useEffect, useState } from 'react';
@@ -20,8 +16,15 @@ import type { User } from '@supabase/supabase-js';
 
 import { ensureSession, supabase } from '@/lib/supabase';
 import { applyReduceMotion, readReduceMotion } from '@/lib/prefs';
+import { useExperimentList } from '@/lib/queries/useExperiment';
+import { agentCardView, type AgentCardView } from '@/lib/ui/agentCard';
+import { voiceStatusView } from '@/lib/ui/voiceStatus';
+import { isBenchPath } from '@/lib/ui/benchMode';
 import { useVoiceSession } from '@/components/voice/VoiceSession';
-import { DeskVoiceBar, HeaderVoiceControl } from '@/components/voice/GlobalVoice';
+import { VoiceDock } from '@/components/voice/VoiceDock';
+import { HeaderTimerChip } from '@/components/timer/TimerChip';
+import { CommandBar } from '@/components/ui/CommandBar';
+import { StartVoiceButton } from '@/components/ui/StartVoiceButton';
 import {
   IconChevron,
   IconChevronsLeft,
@@ -29,6 +32,7 @@ import {
   IconFlask,
   IconGauge,
   IconMenu,
+  IconMicOff,
   IconOverview,
   IconProtocol,
   IconRuler,
@@ -46,10 +50,10 @@ const NAV = [
       { href: '/protocols', label: 'Protocols', icon: IconProtocol },
     ],
   },
-  {
-    label: 'Quality',
-    items: [{ href: '/reliability', label: 'Reliability', icon: IconGauge }],
-  },
+  // {
+  //   label: 'Quality',
+  //   items: [{ href: '/reliability', label: 'Reliability', icon: IconGauge }],
+  // },
   {
     label: 'Settings',
     items: [
@@ -97,6 +101,69 @@ function isActive(pathname: string, href: string, exact?: boolean) {
   return pathname.startsWith(href);
 }
 
+const DOT: Record<AgentCardView['dot'], string> = {
+  green: 'bg-status-running-on-dark',
+  clay: 'bg-primary-glow',
+  grey: 'bg-on-dark-muted',
+  amber: 'bg-deviation-on-dark',
+  danger: 'bg-danger-on-dark',
+};
+
+/** The live agent status card (DESIGN.md agent-status-card). */
+function AgentCard({ collapsed }: { collapsed: boolean }) {
+  const voice = useVoiceSession();
+  const card = agentCardView(voiceStatusView(voice, voice.understoodAt, Date.now()), voice, voice.mic);
+  const problem = card.dot === 'danger';
+  const dot = (
+    <span aria-hidden className="relative flex h-[10px] w-[10px] shrink-0">
+      {card.pulse && <span className={`absolute inset-0 animate-pulse-dot rounded-full ${DOT[card.dot]}`} />}
+      <span className={`relative h-[10px] w-[10px] rounded-full ${DOT[card.dot]}`} />
+    </span>
+  );
+  const body = collapsed ? (
+    <span className="grid h-10 place-items-center" title={`${card.title} · ${card.subtitle}`}>
+      {problem ? <IconMicOff className="h-[18px] w-[18px] text-danger-on-dark" /> : dot}
+    </span>
+  ) : (
+    <span className="flex items-start gap-sm">
+      <span className="mt-[5px]">{dot}</span>
+      <span className="min-w-0">
+        <span className={`block truncate text-title-sm ${problem ? 'text-danger-on-dark' : 'text-on-dark-strong'}`}>
+          {card.title}
+        </span>
+        <span className="block truncate text-caption text-sidebar-muted">{card.subtitle}</span>
+      </span>
+    </span>
+  );
+  const className = `block w-full rounded-lg border bg-sidebar-card text-left ${collapsed ? '' : 'p-sm'} ${
+    problem ? 'border-danger-on-dark/40' : 'border-sidebar-border'
+  }`;
+
+  // A tap can fix it: open the browser's microphone prompt from here.
+  if (card.requestable) {
+    return (
+      <button
+        type="button"
+        onClick={() => void voice.requestMic()}
+        className={`${className} transition-colors hover:border-danger-on-dark`}
+        aria-live="polite"
+        title="Allow the microphone"
+      >
+        {body}
+      </button>
+    );
+  }
+  return card.href ? (
+    <Link href={card.href} className={`${className} transition-colors hover:border-dark-border`} aria-live="polite">
+      {body}
+    </Link>
+  ) : (
+    <div className={className} aria-live="polite" role={problem ? 'alert' : undefined}>
+      {body}
+    </div>
+  );
+}
+
 function Sidebar({
   collapsed,
   onCollapse,
@@ -111,6 +178,8 @@ function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
   const voice = useVoiceSession();
+  const experiments = useExperimentList();
+  const liveCount = (experiments.data ?? []).filter((e) => e.status === 'RUNNING').length;
 
   async function signOut() {
     if (voice.live) voice.disconnect();
@@ -121,42 +190,37 @@ function Sidebar({
   return (
     <nav
       aria-label="Primary"
-      className="sidebar flex h-full flex-col bg-surface-dark text-on-dark-soft"
+      className={`dark-scope flex h-full flex-col bg-sidebar text-sidebar-text ${collapsed ? 'px-[10px]' : 'px-[14px]'} pb-[16px] pt-[20px]`}
     >
-      <div className={`flex h-16 shrink-0 items-center ${collapsed ? 'justify-center' : 'px-lg'}`}>
-        <Link
-          href="/dashboard"
-          onClick={onNavigate}
-          className="group flex items-center gap-sm"
-          aria-label="LabLog overview"
-        >
-          <span className="grid h-8 w-8 place-items-center rounded-md bg-primary/15 text-primary ring-1 ring-inset ring-primary/25 transition-transform duration-300 group-hover:rotate-[-8deg]">
-            <Logo className="h-5 w-5" />
+      <Link
+        href="/dashboard"
+        onClick={onNavigate}
+        className={`group flex items-center gap-sm ${collapsed ? 'justify-center' : 'px-[6px]'}`}
+        aria-label="LabLog overview"
+      >
+        <span className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-md border border-sidebar-border bg-sidebar-card text-sidebar-icon-active">
+          <Logo className="h-[22px] w-[22px]" />
+        </span>
+        {!collapsed && (
+          <span className="leading-none">
+            <span className="block font-display text-wordmark text-on-dark">LabLog</span>
+            <span className="mt-[3px] block text-caption text-sidebar-muted">Voice notebook</span>
           </span>
-          {!collapsed && (
-            <span className="leading-none">
-              <span className="block font-display text-[22px] text-on-dark">LabLog</span>
-              <span className="mt-[3px] block text-[11px] tracking-[0.4px] text-on-dark-soft/70">
-                Voice notebook
-              </span>
-            </span>
-          )}
-        </Link>
-      </div>
+        )}
+      </Link>
 
-      <div className="flex-1 overflow-y-auto px-sm pb-md">
+      <div className="mt-lg flex-1 overflow-y-auto">
         {NAV.map((group) => (
           <div key={group.label} className="mt-lg first:mt-xs">
             {collapsed ? (
-              <div className="mx-auto mb-xs h-px w-6 bg-white/10" aria-hidden />
+              <div className="mx-auto mb-xs h-px w-6 bg-sidebar-border" aria-hidden />
             ) : (
-              <p className="mb-xs px-sm text-[11px] font-medium tracking-[1.2px] text-on-dark-soft/55">
-                {group.label}
-              </p>
+              <p className="mb-xs px-sm text-eyebrow uppercase text-sidebar-label">{group.label}</p>
             )}
             <ul className="space-y-[2px]">
               {group.items.map(({ href, label, icon: Glyph, exact }) => {
                 const active = isActive(pathname, href, exact);
+                const badge = href === '/experiments' && liveCount > 0;
                 return (
                   <li key={href}>
                     <Link
@@ -164,12 +228,27 @@ function Sidebar({
                       onClick={onNavigate}
                       aria-current={active ? 'page' : undefined}
                       title={collapsed ? label : undefined}
-                      className={`side-link ${active ? 'side-link-active' : ''} ${
-                        collapsed ? 'justify-center px-0' : ''
+                      className={`relative flex h-11 items-center gap-sm rounded-md text-nav transition-colors ${
+                        collapsed ? 'justify-center px-0' : 'px-sm'
+                      } ${
+                        active
+                          ? 'bg-sidebar-active text-on-dark-strong'
+                          : 'text-sidebar-text hover:bg-sidebar-hover hover:text-on-dark'
                       }`}
                     >
-                      <Glyph className="h-[18px] w-[18px] shrink-0" />
-                      {!collapsed && <span>{label}</span>}
+                      <Glyph className={`h-[18px] w-[18px] shrink-0 ${active ? 'text-sidebar-icon-active' : ''}`} />
+                      {!collapsed && <span className="flex-1">{label}</span>}
+                      {badge &&
+                        (collapsed ? (
+                          <span
+                            aria-label={`${liveCount} live`}
+                            className="absolute right-[6px] top-[6px] h-[7px] w-[7px] rounded-full bg-status-running-on-dark"
+                          />
+                        ) : (
+                          <span className="rounded-pill bg-status-running-bg-dark px-[7px] py-[2px] text-caption text-status-running-on-dark">
+                            {liveCount} live
+                          </span>
+                        ))}
                     </Link>
                   </li>
                 );
@@ -179,29 +258,29 @@ function Sidebar({
         ))}
       </div>
 
-      <div className="border-t border-white/[0.06] p-sm">
-        <div className={`flex items-center gap-sm rounded-md p-xs ${collapsed ? 'justify-center' : ''}`}>
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-accent-teal/15 text-[12px] font-semibold text-accent-teal">
+      <AgentCard collapsed={collapsed} />
+
+      <div className="mt-md border-t border-sidebar-border pt-md">
+        <div className={`flex items-center gap-sm ${collapsed ? 'justify-center' : ''}`}>
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-avatar-bg text-caption font-semibold text-avatar-text">
             {initials(user)}
           </span>
           {!collapsed && (
             <>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium text-on-dark">
+                <span className="block truncate text-title-sm text-on-dark">
                   {(user?.user_metadata?.display_name as string) || 'Signed in'}
                 </span>
-                <span className="block truncate text-[11px] text-on-dark-soft/70">
-                  {user?.email ?? 'guest session'}
-                </span>
+                <span className="block truncate text-caption text-sidebar-muted">{user?.email ?? 'guest session'}</span>
               </span>
               <button
                 type="button"
                 onClick={() => void signOut()}
-                className="icon-btn-dark"
+                className="grid h-10 w-10 place-items-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-hover hover:text-on-dark"
                 aria-label="Sign out"
                 title="Sign out"
               >
-                <IconSignOut className="h-4 w-4" />
+                <IconSignOut className="h-[18px] w-[18px]" />
               </button>
             </>
           )}
@@ -210,14 +289,12 @@ function Sidebar({
           <button
             type="button"
             onClick={onCollapse}
-            className={`mt-xxs flex w-full items-center gap-sm rounded-md px-sm py-xs text-[12px] text-on-dark-soft/70 transition-colors hover:bg-white/[0.04] hover:text-on-dark ${
+            className={`mt-xs flex h-10 w-full items-center gap-sm rounded-md px-sm text-caption text-sidebar-muted transition-colors hover:bg-sidebar-hover hover:text-on-dark ${
               collapsed ? 'justify-center' : ''
             }`}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            <IconChevronsLeft
-              className={`h-4 w-4 transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`}
-            />
+            <IconChevronsLeft className={`h-4 w-4 transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`} />
             {!collapsed && 'Collapse'}
           </button>
         )}
@@ -226,28 +303,20 @@ function Sidebar({
   );
 }
 
-function Header({
-  crumbs,
-  onMenu,
-  user,
-}: {
-  crumbs: Crumb[];
-  onMenu: () => void;
-  user: User | null;
-}) {
+function Header({ crumbs, onMenu, user }: { crumbs: Crumb[]; onMenu: () => void; user: User | null }) {
   return (
-    <header className="app-header">
-      <div className="flex h-16 items-center gap-sm px-md lg:px-xl">
-        <button type="button" onClick={onMenu} className="icon-btn lg:hidden" aria-label="Open navigation">
+    <header className="sticky top-0 z-header border-b border-hairline bg-canvas">
+      <div className="flex h-[68px] items-center gap-sm px-md lg:px-[32px]">
+        <button type="button" onClick={onMenu} className="icon-btn -ml-xs lg:hidden" aria-label="Open navigation">
           <IconMenu className="h-5 w-5" />
         </button>
 
-        <ol className="flex min-w-0 items-center gap-xxs text-body-sm" aria-label="Breadcrumb">
+        <ol className="flex min-w-0 items-center gap-xxs text-body-md" aria-label="Breadcrumb">
           {crumbs.map((crumb, i) => {
             const last = i === crumbs.length - 1;
             return (
               <li key={`${crumb.label}-${i}`} className="flex min-w-0 items-center gap-xxs">
-                {i > 0 && <IconChevron className="h-3.5 w-3.5 shrink-0 text-muted-soft" />}
+                {i > 0 && <IconChevron className="h-3.5 w-3.5 shrink-0 text-muted" />}
                 {crumb.href && !last ? (
                   <Link href={crumb.href} className="truncate text-muted transition-colors hover:text-ink">
                     {crumb.label}
@@ -266,10 +335,12 @@ function Header({
         </ol>
 
         <div className="ml-auto flex items-center gap-sm">
-          <HeaderVoiceControl />
+          <HeaderTimerChip />
+          <CommandBar />
+          <StartVoiceButton />
           <Link
             href="/settings/account"
-            className="grid h-9 w-9 place-items-center rounded-md bg-surface-card text-[12px] font-semibold text-ink ring-1 ring-inset ring-hairline transition-colors hover:bg-surface-cream-strong"
+            className="hidden h-[42px] w-[42px] shrink-0 place-items-center rounded-lg border border-border-control bg-surface-muted-strong text-caption font-semibold text-ink transition-colors hover:border-border-hover sm:grid"
             aria-label="Account settings"
           >
             {initials(user)}
@@ -306,9 +377,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (readReduceMotion()) applyReduceMotion(true);
     try {
-      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === '1');
+      const stored = localStorage.getItem(COLLAPSE_KEY);
+      // Tablet widths start on the icon rail (specs/005 R-521) unless the user chose.
+      setCollapsed(stored === null ? window.innerWidth < 1200 : stored === '1');
     } catch {
-      /* storage unavailable: default to expanded */
+      setCollapsed(window.innerWidth < 1200);
     }
   }, []);
 
@@ -325,11 +398,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
   }
 
+  // Bench mode is full-screen and dark: no sidebar, header or dock. The providers
+  // above stay mounted, so a live session and step timers survive the switch
+  // (contracts/ui-routes.md §1).
+  if (isBenchPath(pathname)) {
+    return (
+      <UserContext.Provider value={user}>
+        <CrumbContext.Provider value={setCrumbs}>{children}</CrumbContext.Provider>
+      </UserContext.Provider>
+    );
+  }
+
   return (
     <UserContext.Provider value={user}>
       <CrumbContext.Provider value={setCrumbs}>
         <div
-          className="app-frame"
+          className="min-h-dvh bg-canvas"
           style={{ '--sidebar-w': collapsed ? '72px' : '248px' } as React.CSSProperties}
         >
           {/* desktop rail */}
@@ -346,7 +430,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 onClick={() => setDrawer(false)}
                 aria-label="Close navigation"
               />
-              <div className="relative h-full w-[272px] animate-slide-in-left shadow-dark">
+              <div className="relative h-full w-[272px] animate-slide-in-left shadow-dock">
                 <Sidebar collapsed={false} onNavigate={() => setDrawer(false)} user={user} />
                 <button
                   type="button"
@@ -363,7 +447,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="min-h-dvh transition-[padding] duration-300 ease-out lg:pl-[var(--sidebar-w)]">
             <Header crumbs={crumbs} onMenu={() => setDrawer(true)} user={user} />
             {children}
-            <DeskVoiceBar />
+            <VoiceDock />
           </div>
         </div>
       </CrumbContext.Provider>

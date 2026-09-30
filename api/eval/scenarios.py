@@ -6,15 +6,29 @@
   {"refuse": True}               no record, and no invented procedure
   {"error": CODE}                no record; if the tool is called, the handler returns CODE
   {"all": [{"tool":..., "args":...}, ...]}  every listed call must succeed; no other write
+`history_runs=True` seeds STAB-100..102 COMPLETED (tests.conftest.seed_history).
 `profile` (default "bench") selects the prompt and tool set the scenario runs under.
 Any successful write other than the expected tool counts as a false record.
 """
+
+from tests.conftest import TIMED_STEPS
+
+TEN_MINUTE_TIMER = ("step_timer", {"action": "start", "duration_value": 10, "duration_unit": "minutes"})
 
 A17_AT_4_2 = {
     "setup": [("record_measurement", {"sample_code": "A17", "measurement_type": "temperature", "value": 4.2, "unit": "C"})],
     "history": [
         {"role": "user", "content": "A17 is 4.2 Celsius."},
         {"role": "assistant", "content": "Recorded. A17 temperature is 4.2 degrees Celsius."},
+    ],
+}
+
+# specs/006: STAB-104 is at step index 1, so this lines up with STAB-102's 4.4 there.
+A17_AT_4_3 = {
+    "setup": [("record_measurement", {"sample_code": "A17", "measurement_type": "temperature", "value": 4.3, "unit": "C"})],
+    "history": [
+        {"role": "user", "content": "A17 is 4.3 Celsius."},
+        {"role": "assistant", "content": "Recorded. A17 temperature is 4.3 degrees Celsius."},
     ],
 }
 
@@ -28,6 +42,13 @@ ALL_TEMPS = {
 
 def _s(id, category, utterance, expect, profile="bench", **context):
     return {"id": id, "category": category, "utterance": utterance, "expect": expect, "profile": profile, **context}
+
+
+# Every sample's temperature at the current step, for scenarios that complete it.
+TEMPS_DONE = [
+    ("record_measurement", {"sample_code": c, "measurement_type": "temperature", "value": 4.2, "unit": "C"})
+    for c in ("A17", "A18", "CONTROL-01")
+]
 
 
 def _temp(code, value, unit="C"):
@@ -78,6 +99,12 @@ SCENARIOS = [
        {"tool": "record_observation", "args": {"sample_code": "CONTROL-01"}}),
     _s("cls_04", "classification", "Log a deviation: preparation was delayed forty minutes.",
        {"tool": "create_deviation"}),
+    # .specify/bugs/observations-not-counted: "all samples" is one note per sample,
+    # and a missed earlier step can still be filled in by naming it.
+    _s("cls_05", "classification", "All samples look clear and colourless.",
+       {"tool": "record_observation", "args": {"all_samples": True, "sample_codes": ["A17", "A18", "CONTROL-01"]}}),
+    _s("cls_06", "classification", "For step 2, A17 was 4.2 Celsius.",
+       {"tool": "record_measurement", "args": {"sample_code": "A17", "value": 4.2, "late": True}}, at_step=3),
 
     # -- invalid input: the backend rejects, nothing is written --------------
     _s("inv_01", "invalid_input", "A99 is 4.1 Celsius.", {"error": "SAMPLE_NOT_FOUND"}),
@@ -164,4 +191,93 @@ SCENARIOS = [
        {"tool": "start_experiment", "args": {"experiment_code": "STAB-104"}}, profile="desk"),
     _s("desk_06", "lifecycle", "Start experiment XYZ-9.", {"error": "EXPERIMENT_NOT_FOUND"}, profile="desk"),
     _s("desk_07", "lifecycle", "A17 is 4.2 Celsius.", {"clarify": True}, profile="desk"),
+    # specs/007 R-716: types ride in test_samples/control_samples; scored on what was stored.
+    _s("desk_08", "lifecycle", "Yes, create it.",
+       {"tool": "create_experiment", "args": {
+           "name": "Stability Run 3",
+           "samples": [{"code": "A17", "sample_type": "test"}, {"code": "CONTROL-01", "sample_type": "control"}],
+       }},
+       profile="desk", history=[
+           {"role": "user", "content": "Create an experiment called Stability Run 3 on the sample stability protocol. A17 is a test sample and CONTROL-01 is the control."},
+           {"role": "assistant", "content": "Stability Run 3 on Sample Stability Evaluation v1, A17 test and CONTROL-01 control, started right away. Shall I create it?"},
+       ]),
+    # -- search (specs/006 US1/US3). `history_runs` seeds STAB-100..102. Written,
+    # never run for 006: the owner waived the A-1 eval (plan G14). ----------------
+    _s("search_01", "search", "Show my stability experiments from this week.",
+       {"tool": "search_experiments", "args": {"period": "this_week"}}, profile="desk", history_runs=True),
+    _s("search_02", "search", "Find experiments containing sample A17.",
+       {"tool": "search_experiments", "args": {"sample_code": "A17"}}, profile="desk", history_runs=True),
+    _s("search_03", "search", "Which experiments had temperature deviations?",
+       {"tool": "search_experiments", "args": {"deviation_about": "temperature"}}, profile="desk", history_runs=True),
+    _s("search_04", "search", "Which experiments are running?",
+       {"tool": "search_experiments", "args": {"status": "RUNNING"}}, profile="desk", history_runs=True),
+    _s("search_05", "search", "Completed stability runs from last week.",
+       {"tool": "search_experiments", "args": {"status": "COMPLETED", "period": "last_week"}},
+       profile="desk", history_runs=True),
+    _s("search_06", "search", "Experiments from the 3rd to the 9th.", {"clarify": True}, profile="desk", history_runs=True),
+    _s("search_07", "search", "Open experiment STAB-102.",
+       {"tool": "search_experiments", "args": {"text": "STAB-102", "open": True}}, profile="desk", history_runs=True),
+    # Several match: the tool opens nothing and the agent must ask which one.
+    _s("search_08", "search", "Open the stability experiment.",
+       {"tool": "search_experiments", "args": {"open": True}}, profile="desk", history_runs=True),
+    # -- comparison (specs/006 US2): only the backend's numbers (SC-401). ------
+    _s("cmp_01", "comparison", "How does this temperature compare with the previous run?",
+       {"tool": "get_sample_history", "args": {"sample_code": "A17", "compare_previous": True},
+        "spoken": ["4.4", "0.1", "lower"]}, history_runs=True, **A17_AT_4_3),
+    _s("cmp_02", "comparison", "Is A17 higher or lower than last time?",
+       {"tool": "get_sample_history", "args": {"sample_code": "A17", "compare_previous": True},
+        "spoken": ["lower"]}, history_runs=True, **A17_AT_4_3),
+    _s("cmp_03", "comparison", "Compare A18 with the previous run.",
+       {"error": "NO_CORRESPONDING_MEASUREMENT"}, history_runs=True, **A17_AT_4_3),
+    _s("cmp_04", "comparison", "How does this temperature compare with the previous run?",
+       {"error": "NO_PREVIOUS_RUN"}, **A17_AT_4_3),
+    # -- timers (specs/004-step-timers FR-323) ---------------------------------
+    # `steps` / `at_step` move the run before the prompt is built (eval/run.py).
+    # Every `setup` passes an explicit duration: test_eval runs setups against the
+    # default store, where the current step is untimed.
+    _s("timer_01", "timer", "Start a timer for 10 minutes.",
+       {"tool": "step_timer", "args": {"action": "start", "duration_seconds": 600}}, steps=TIMED_STEPS, at_step=2),
+    _s("timer_02", "timer", "Set a timer for an hour and a half.",
+       {"tool": "step_timer", "args": {"action": "start", "duration_seconds": 5400}}),
+    _s("timer_03", "timer", "Start a 90 second timer.",
+       {"tool": "step_timer", "args": {"action": "start", "duration_seconds": 90}}),
+    # SC-303: no duration from the user and none in the step — ask, never invent.
+    _s("timer_04", "timer", "Start a timer.", {"clarify": True}),
+    _s("timer_05", "timer", "Start a timer for zero seconds.", {"error": "DURATION_OUT_OF_RANGE"}),
+    _s("timer_06", "timer", "Start the timer.",
+       {"tool": "step_timer", "args": {"action": "start", "duration_seconds": 600}}, steps=TIMED_STEPS, at_step=2),
+    _s("timer_07", "timer", "Start a timer for 5 minutes.", {"clarify": True}, profile="desk"),
+    # FR-309 / SC-304: offer only when the timed step is CURRENT; never start unasked.
+    _s("timer_10", "timer", "What's next?",
+       {"tool": "get_next_protocol_step", "offer": False}, steps=TIMED_STEPS, at_step=1),
+    # The step's readings are recorded first: with any missing, the tool asks
+    # before completing (STEP_INCOMPLETE), which is not what these measure.
+    _s("timer_11", "timer", "Complete this step.",
+       {"tool": "complete_protocol_step", "offer": True}, steps=TIMED_STEPS, at_step=1, setup=TEMPS_DONE),
+    _s("timer_12", "timer", "Complete this step.", {"tool": "complete_protocol_step", "offer": False},
+       setup=TEMPS_DONE),
+    _s("gate_01", "completion", "Next step.", {"error": "STEP_INCOMPLETE"}),
+    _s("timer_13", "timer", "Start the timer.", {"clarify": True}, steps=TIMED_STEPS, at_step=4),
+    # FR-311: the user's duration wins; a deviation is only offered, never written.
+    _s("timer_14", "timer", "Yes, but make it 12 minutes.",
+       {"tool": "step_timer", "args": {"action": "start", "duration_seconds": 720}},
+       steps=TIMED_STEPS, at_step=2,
+       history=[
+           {"role": "user", "content": "What step am I on?"},
+           {"role": "assistant", "content": "Step 3, centrifuge at 4,000 rpm. This step is timed, 10 minutes. "
+                                            "Shall I start the timer?"},
+       ]),
+    _s("timer_15", "timer", "How long should I centrifuge?", {"refuse": True}),
+    _s("timer_16", "timer", "What step am I on?", {"offer": True}, steps=TIMED_STEPS, at_step=2),
+    # US3: status, cancel, replace. A timer is already running (explicit duration: see above).
+    _s("timer_20", "timer", "Stop the timer.",
+       {"tool": "step_timer", "args": {"action": "cancel"}}, setup=[TEN_MINUTE_TIMER]),
+    _s("timer_21", "timer", "How long is left?",
+       {"tool": "step_timer", "args": {"action": "status"}}, setup=[TEN_MINUTE_TIMER]),
+    # FR-303: a second timer is refused; the agent asks before replacing.
+    _s("timer_22", "timer", "Start a timer for 5 minutes.", {"clarify": True}, setup=[TEN_MINUTE_TIMER]),
+    _s("timer_23", "timer", "Cancel the timer.", {"error": "NO_TIMER_RUNNING"}),
+    # FR-320: completing a step whose timer still runs asks first; nothing is completed.
+    _s("timer_30", "timer", "Complete this step.", {"error": "TIMER_STILL_RUNNING"},
+       steps=TIMED_STEPS, at_step=2, setup=[TEN_MINUTE_TIMER]),
 ]

@@ -32,7 +32,12 @@ DEFAULT_TIMEOUT_SECONDS = 30
 
 
 def _clean_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Strip Pydantic bookkeeping the agent does not need."""
+    """Strip Pydantic bookkeeping the agent does not need.
+
+    Arguments stay flat: no nested models, so no $defs to resolve. The voice agent
+    accepts a nested schema silently and then cannot call the tool (specs/007
+    R-711); test_every_schema_stays_in_the_vendor_subset holds the line.
+    """
     schema.pop("title", None)
     for prop in (schema.get("properties") or {}).values():
         prop.pop("title", None)

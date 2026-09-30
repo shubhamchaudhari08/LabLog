@@ -347,3 +347,118 @@ def test_missing_protocol_is_404(client, sb, path):
 def test_edit_and_delete_require_a_token(client, sb):
     assert client.put(f"{URL}/{PROTOCOL_ID}", json=EDITED).status_code == 401
     assert client.delete(f"{URL}/{PROTOCOL_ID}").status_code == 401
+
+
+# -- specs/007: structured requirements and a duration window ------------------
+
+
+def test_stores_structured_requirements_and_window(client, sb):
+    result = post(client, one_step(
+        readings=[{"type": "temperature", "unit": "C"}],
+        requirements=[
+            {"type": "measurement", "measurement_type": "Temperature", "unit": "C", "min": 2, "max": 8},
+            {"type": "observation"},
+        ],
+        expected_duration_seconds=900, min_duration_seconds=840, max_duration_seconds=1020,
+    ))
+    assert result["success"] is True
+    [step] = created(sb)["steps"]
+    assert step["requirements"] == [
+        {"type": "measurement", "measurement_type": "temperature", "scope": "all_samples", "unit": "C", "min": 2.0, "max": 8.0},
+        {"type": "observation", "scope": "all_samples"},
+    ]
+    assert (step["expected_duration_seconds"], step["min_duration_seconds"], step["max_duration_seconds"]) == (900, 840, 1020)
+
+
+def test_readings_only_step_is_stored_exactly_as_before(client, sb):
+    post(client, one_step(readings=[{"type": "temperature", "unit": "C"}]))
+    [step] = created(sb)["steps"]
+    assert set(step) == {"index", "id", "name", "required_fields", "default_unit"}
+
+
+@pytest.mark.parametrize("step", [
+    {"requirements": [{"type": "measurement", "measurement_type": "pH", "min": 8, "max": 6}]},
+    {"requirements": [{"type": "sensor_reading"}]},
+    {"requirements": [{"type": "samples", "sample_type": "control", "count": 0}]},
+    {"min_duration_seconds": 1020, "max_duration_seconds": 840},
+])
+def test_rejects_malformed_requirements(client, sb, step):
+    assert_rejected(client, sb, one_step(**step), "INVALID_ARGS")
+
+
+# -- specs/007 form: expected values on readings, toggles, sample rules ---------
+
+
+def test_reading_range_is_stored_as_a_requirement_beside_required_fields(client, sb):
+    post(client, one_step(readings=[{"type": "temperature", "unit": "C", "min": 2, "max": 8}]))
+    [step] = created(sb)["steps"]
+    # What older readers use is unchanged…
+    assert (step["required_fields"], step["default_unit"]) == (["sample_id", "temperature"], {"temperature": "C"})
+    # …and the expectation is structured.
+    assert step["requirements"] == [
+        {"type": "measurement", "measurement_type": "temperature", "scope": "all_samples", "unit": "C", "min": 2.0, "max": 8.0}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("reading", "stored"),
+    [
+        ({"type": "temperature", "unit": "C", "exact": 4}, {"exact": 4.0}),
+        ({"type": "temperature", "unit": "C", "min": 2}, {"min": 2.0}),
+        ({"type": "temperature", "unit": "C", "max": 8}, {"max": 8.0}),
+        ({"type": "ph", "min": 6.5, "max": 7.5}, {"min": 6.5, "max": 7.5}),  # pH's only unit is filled in
+    ],
+)
+def test_exact_and_one_sided_expectations(client, sb, reading, stored):
+    assert post(client, one_step(readings=[reading]))["success"] is True
+    [requirement] = created(sb)["steps"][0]["requirements"]
+    assert {k: requirement[k] for k in stored} == stored
+    assert requirement["unit"] == ("pH" if reading["type"] == "ph" else "C")
+    assert not {"min", "max", "exact"} - set(stored) & set(requirement)  # only what was given
+
+
+def test_toggles_and_sample_rules_are_stored(client, sb):
+    post(client, one_step(requirements=[
+        {"type": "observation", "scope": "all_samples"},
+        {"type": "deviation_review"},
+        {"type": "samples", "sample_type": "test", "count": 2},
+        {"type": "samples", "sample_type": "control", "count": 1},
+    ]))
+    assert [r["type"] for r in created(sb)["steps"][0]["requirements"]] == [
+        "observation", "deviation_review", "samples", "samples",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("step", "why"),
+    [
+        ({"readings": [{"type": "temperature", "min": 2, "max": 8}]}, "unit"),
+        ({"readings": [{"type": "temperature", "unit": "C", "exact": 4, "min": 2}]}, "exact value or a range"),
+        ({"readings": [{"type": "temperature", "unit": "C", "min": 8, "max": 2}]}, "min must not exceed max"),
+        ({"readings": [{"type": "temperature", "unit": "C", "min": 2}, {"type": "Temperature", "unit": "C", "max": 8}]},
+         "listed twice"),
+        ({"readings": [{"type": "temperature", "unit": "C", "min": 2}],
+          "requirements": [{"type": "measurement", "measurement_type": "temperature", "unit": "C", "max": 8}]}, "give it once"),
+    ],
+)
+def test_rejects_ambiguous_expectations(client, sb, step, why):
+    result = assert_rejected(client, sb, one_step(**step), "INVALID_ARGS")
+    assert why in " ".join(e["msg"] for e in result["detail"]["errors"])
+
+
+def test_duplicate_reading_without_expectations_is_still_stored_once(client, sb):
+    post(client, one_step(readings=[{"type": "temperature", "unit": "C"}, {"type": "temperature", "unit": "C"}]))
+    assert created(sb)["steps"][0]["required_fields"] == ["sample_id", "temperature"]
+
+
+def test_edit_round_trip_keeps_every_requirement(client, sb):
+    body = {**CONTRACT_REQUEST, "steps": [{
+        "name": "Stability hold",
+        "readings": [{"type": "temperature", "unit": "C", "exact": 4}],
+        "requirements": [{"type": "observation"}, {"type": "step_execution"}],
+        "expected_duration_seconds": 900, "min_duration_seconds": 840, "max_duration_seconds": 1020,
+    }]}
+    mine = client.post(URL, json=body, headers=auth()).json()["protocol"]
+    before = mine["steps"]
+    res = client.put(f"{URL}/{mine['id']}", json=body, headers=auth()).json()
+    assert res["success"] and res["protocol"]["steps"] == before

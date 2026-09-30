@@ -1,282 +1,308 @@
 'use client';
 
 /**
- * The voice console, docked to the bottom of the workspace.
+ * The voice dock (DESIGN.md voice-dock, D-7; specs/005 US3): one floating dark
+ * panel, centred at the bottom of every light screen while a session is live.
+ * It replaces the desk bar and the workspace's in-page dock.
  *
- * Bottom-centre is where call controls live on every device people already
- * use, so it is found without looking. It also keeps the microphone clear of
- * the two things a scientist reads while speaking: the sample board above it
- * and the protocol rail beside it. It is sticky, not fixed, so it never covers
- * the protocol rail — a microphone that slides off-screen mid-sentence is a
- * broken microphone.
+ * It says honestly what the microphone is doing, shows what it heard, and,
+ * after a stored result, chips built from the stored values: never from the
+ * transcript (Constitution Principle I). Pause mutes; Close ends the session.
+ * The whole conversation is one click away in the transcript sheet.
  *
- * Collapsed, it shows one line: the words being heard right now. The full
- * transcript opens upward from the same surface.
+ * Bench mode has its own surface, so the shell never mounts this there.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { TranscriptPanel } from './TranscriptPanel';
-import { STATUS_COPY, STATUS_DOT, useVoiceSession } from './VoiceSession';
-import { IconMic, IconMicOff, IconStop, IconTranscript } from '@/components/icons';
-import type { VoiceStatusValue } from '@/lib/voiceClient/types';
+import { useVoiceSession } from './VoiceSession';
+import { IconClose, IconMic, IconMicOff, IconPause, IconTranscript } from '@/components/icons';
+import { Caret, Orb, Waveform } from '@/components/ui/voiceVisuals';
+import { useExperiment } from '@/lib/queries/useExperiment';
+import { useMeasurementTypes } from '@/lib/queries/useMeasurementTypes';
+import { dockMode } from '@/lib/ui/dockMode';
+import { intentChips } from '@/lib/ui/intentChips';
+import { TONE_ON_DARK, voiceStatusView } from '@/lib/ui/voiceStatus';
 
-const HEARING = new Set<VoiceStatusValue>(['listening', 'thinking', 'speaking']);
+const SHELL =
+  'dark-surface pointer-events-auto w-full max-w-[760px] animate-slide-up rounded-feature border border-[#332d26] bg-dark-panel shadow-dock max-md:rounded-b-none';
 
-/** Five bars rather than a spinner: a spinner says "wait", this says "hearing you". */
-function Meter({ status, muted }: { status: VoiceStatusValue; muted: boolean }) {
-  const on = HEARING.has(status) && !muted;
+function useNow(active: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+/** Bottom-centre of the content area, clear of the sidebar; a bottom sheet on phones. */
+function Frame({ children }: { children: React.ReactNode }) {
   return (
-    <span className="flex h-6 items-center gap-[3px]" aria-hidden>
-      {[0.55, 0.85, 1, 0.75, 0.5].map((height, i) => (
-        <span
-          key={i}
-          className={`w-[3px] origin-center rounded-pill transition-colors duration-300 ${
-            on ? STATUS_DOT[status] : 'bg-white/15'
-          } ${on ? 'animate-bar' : ''}`}
-          style={{
-            height: `${height * 100}%`,
-            transform: on ? undefined : 'scaleY(0.3)',
-            animationDelay: `${i * 110}ms`,
-            animationDuration: status === 'speaking' ? '0.7s' : '1.1s',
-          }}
-        />
-      ))}
-    </span>
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-dock flex justify-center md:bottom-[28px] md:px-md lg:pl-[calc(var(--sidebar-w)+16px)]">
+      {children}
+    </div>
   );
 }
 
-export function VoiceDock({
-  experimentId,
-  experimentCode,
-  closed = false,
-}: {
-  experimentId: string;
-  experimentCode: string;
-  /** COMPLETED or CANCELLED: no session may start here (the API refuses it too). */
-  closed?: boolean;
-}) {
+/** One-line variants: the session belongs somewhere else, or could move here. */
+function Notice({ children }: { children: React.ReactNode }) {
+  return (
+    <Frame>
+      <section aria-label="Voice session" className={`${SHELL} flex flex-wrap items-center gap-md px-[24px] py-md`}>
+        {children}
+      </section>
+    </Frame>
+  );
+}
+
+export function VoiceDock() {
   const voice = useVoiceSession();
+  const pathname = usePathname();
+  const types = useMeasurementTypes();
   const [open, setOpen] = useState(false);
 
-  if (closed) {
+  const pageExperimentId = /^\/dashboard\/experiments\/([^/]+)$/.exec(pathname)?.[1] ?? null;
+  const pageExperiment = useExperiment(pageExperimentId ?? '');
+  const pageCode = (pageExperiment.data?.experiment_code as string | undefined) ?? '';
+  const pageStatus = pageExperiment.data?.status as string | undefined;
+  const closedHere = pageStatus === 'COMPLETED' || pageStatus === 'CANCELLED';
+
+  const now = useNow(voice.understoodAt != null);
+  const stepIndex = voice.bound?.id === pageExperimentId ? (pageExperiment.data?.current_step_index as number | undefined) : undefined;
+  const view = voiceStatusView({ ...voice, stepIndex }, voice.understoodAt, now);
+
+  const mode = dockMode({
+    live: voice.live,
+    error: voice.error,
+    bound: voice.bound,
+    pageExperimentId,
+    closedHere,
+    micNotice: voice.micNotice != null,
+  });
+  if (mode === 'hidden') return null;
+
+  // Voice was asked for, but the microphone cannot be used yet: say what to
+  // fix, and let the user try again once they have (specs/005 follow-up).
+  if (mode === 'mic-needed') {
     return (
-      <div className="sticky bottom-md z-dock mt-xl">
-        <div className="panel-dark flex flex-wrap items-center gap-md rounded-xl px-lg py-md">
-          <IconMicOff className="h-5 w-5 text-on-dark-soft" />
-          <p className="flex-1 text-body-sm text-on-dark">
-            <span className="font-mono text-primary">{experimentCode}</span> is finished, so voice has nothing to
-            record into. Its record stays readable here.
-          </p>
-          {voice.live && voice.bound?.id === experimentId ? (
-            // Normally the session ends itself after complete_experiment; this covers
-            // a run closed some other way (another tab) while the microphone was live.
-            <button type="button" onClick={voice.disconnect} className="btn-dark h-9" aria-label="End voice session">
-              <IconStop className="h-4 w-4 text-primary" />
-              End session
-            </button>
-          ) : (
-            <Link href="/experiments/new" className="btn-dark h-9">
-              New experiment
-            </Link>
-          )}
+      <Notice>
+        <IconMicOff className="h-6 w-6 shrink-0 text-danger-on-dark" />
+        <div className="min-w-0 flex-1" role="alert">
+          <p className="text-eyebrow uppercase text-danger-on-dark">{voice.mic.title}</p>
+          <p className="mt-xxs text-body-md text-on-dark">{voice.micNotice}</p>
         </div>
-      </div>
+        <button type="button" className="btn-primary" onClick={voice.startVoice}>
+          <IconMic className="h-[18px] w-[18px]" />
+          {voice.mic.canRequest ? 'Allow microphone' : 'Try again'}
+        </button>
+        <button
+          type="button"
+          className="icon-btn-dark"
+          onClick={voice.dismissMicNotice}
+          aria-label="Dismiss"
+          title="Dismiss"
+        >
+          <IconClose className="h-5 w-5" />
+        </button>
+      </Notice>
     );
   }
 
-  // A desk session (no experiment) is live: offer to move it onto this experiment.
-  if (voice.live && !voice.bound) {
+  if (mode === 'closed-here') {
     return (
-      <div className="sticky bottom-md z-dock mt-xl">
-        <div className="panel-dark flex flex-wrap items-center gap-md rounded-xl px-lg py-md">
-          <span className={`h-2 w-2 animate-pulse-soft rounded-pill ${STATUS_DOT[voice.status]}`} />
-          <p className="flex-1 text-body-sm text-on-dark">
-            {voice.switching
-              ? `Switching voice to ${voice.switching.code || 'the new experiment'}…`
-              : 'Voice is open with no experiment. Use it here to record into this run.'}
-          </p>
-          {!voice.switching && (
-            <button
-              type="button"
-              className="btn-primary h-9"
-              onClick={() => voice.switchTo({ id: experimentId, code: experimentCode })}
-            >
-              <IconMic className="h-4 w-4" />
-              Use voice on {experimentCode}
-            </button>
-          )}
-        </div>
-      </div>
+      <Notice>
+        <p className="flex-1 text-body-md text-on-dark">
+          <span className="font-mono text-primary-on-dark">{pageCode}</span> is finished, so voice has nothing to record
+          into. Its record stays readable here.
+        </p>
+        {/* Normally the session ends itself after complete_experiment; this covers
+            a run closed some other way (another tab) while the microphone was live. */}
+        <button type="button" onClick={voice.disconnect} className="btn-secondary-dark">
+          End session
+        </button>
+      </Notice>
     );
   }
 
-  const elsewhere = voice.live && voice.bound && voice.bound.id !== experimentId;
-  const live = voice.live && !elsewhere;
-  const degraded = voice.status === 'reconnecting';
-  const lastTurn = voice.turns[voice.turns.length - 1];
-
-  const caption = voice.partial
-    ? voice.partial
-    : lastTurn
-      ? lastTurn.text
-      : live
-        ? 'Speak a reading, a note, or ask what is next.'
-        : 'Start a session and speak your readings. They land in the record as you say them.';
-
-  if (elsewhere) {
+  if (mode === 'offer-switch' && pageExperimentId) {
     return (
-      <div className="sticky bottom-md z-dock mt-xl">
-        <div className="panel-dark flex flex-wrap items-center gap-md rounded-xl px-lg py-md">
-          <span className={`h-2 w-2 animate-pulse-soft rounded-pill ${STATUS_DOT[voice.status]}`} />
-          <p className="flex-1 text-body-sm text-on-dark">
-            The microphone is live on{' '}
-            <span className="font-mono text-primary">{voice.bound?.code}</span>. End that session to record here.
-          </p>
-          <Link href={`/dashboard/experiments/${voice.bound?.id}`} className="btn-dark h-9">
-            Go to {voice.bound?.code}
-          </Link>
-          <button type="button" className="btn-quiet h-9" onClick={voice.disconnect}>
-            End session
+      <Notice>
+        <p className="flex-1 text-body-md text-on-dark">
+          {voice.switching
+            ? `Switching voice to ${voice.switching.code || 'the new experiment'}…`
+            : 'Voice is open with no experiment. Use it here to record into this run.'}
+        </p>
+        {!voice.switching && (
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => voice.switchTo({ id: pageExperimentId, code: pageCode })}
+          >
+            <IconMic className="h-[18px] w-[18px]" />
+            Use voice on {pageCode}
           </button>
-        </div>
-      </div>
+        )}
+      </Notice>
+    );
+  }
+
+  if (mode === 'live-elsewhere' && voice.bound) {
+    return (
+      <Notice>
+        <p className="flex-1 text-body-md text-on-dark">
+          The microphone is live on <span className="font-mono text-primary-on-dark">{voice.bound.code}</span>. End that
+          session to record here.
+        </p>
+        <Link href={`/dashboard/experiments/${voice.bound.id}`} className="btn-secondary-dark">
+          Go to {voice.bound.code}
+        </Link>
+        <button type="button" className="btn-secondary-dark" onClick={voice.disconnect}>
+          End session
+        </button>
+      </Notice>
+    );
+  }
+
+  // --- the session itself ----------------------------------------------------
+  const understood = view.label === 'UNDERSTOOD' && voice.lastOutcome != null;
+  const chips = understood
+    ? intentChips(voice.lastOutcome!.tool, voice.lastOutcome!.data, voice.bound, { typeName: types.typeName })
+    : [];
+  const last = voice.turns[voice.turns.length - 1];
+
+  let line: React.ReactNode;
+  if (voice.partial) {
+    line = (
+      <span className="text-on-dark">
+        “{voice.partial}”
+        {view.wave && <Caret />}
+      </span>
+    );
+  } else if (voice.hint && !last) {
+    line = <span className="text-on-dark-body">{voice.hint}</span>;
+  } else if (last) {
+    line = (
+      <span className={last.role === 'agent' ? 'text-status-running-on-dark' : 'text-on-dark'}>
+        <span className="mr-xs text-eyebrow uppercase text-on-dark-muted">{last.role === 'user' ? 'You' : 'LabLog'}</span>
+        {last.role === 'user' ? `“${last.text}”` : last.text}
+      </span>
+    );
+  } else {
+    line = (
+      <span className="text-on-dark-muted">
+        {voice.bound ? 'Speak a reading, a note, or ask what is next.' : 'Say “what protocols can I run?” or “start a new run of …”.'}
+      </span>
     );
   }
 
   return (
-    <div className="sticky bottom-md z-dock mt-xl">
-      <section
-        aria-label="Voice session"
-        className="panel-dark overflow-hidden rounded-xl"
-      >
-        {/* transcript sheet: opens upward from the same surface */}
+    <Frame>
+      <section aria-label="Voice session" className={SHELL}>
+        {/* the conversation, opening upward from the same surface */}
         <div
           className={`grid transition-[grid-template-rows] duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
             open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
           }`}
         >
           <div className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-white/[0.06] px-lg pb-xs pt-md">
-              <p className="text-[11px] font-medium tracking-[1.2px] text-on-dark-soft/70">
-                Transcript · {experimentCode}
-              </p>
+            <div className="flex items-center justify-between border-b border-dark-line px-[24px] pb-xs pt-md">
+              <p className="text-eyebrow uppercase text-on-dark-muted">Transcript · {voice.bound?.code ?? 'no experiment'}</p>
               {voice.sessionId && (
-                <p className="font-mono text-[11px] text-on-dark-soft/60">
-                  session {voice.sessionId.slice(0, 8)}
-                </p>
+                <p className="font-mono text-[11px] text-on-dark-muted">session {voice.sessionId.slice(0, 8)}</p>
               )}
             </div>
             <TranscriptPanel turns={voice.turns} partial={voice.partial} />
           </div>
         </div>
 
-        {(degraded || voice.error) && (
-          <p
-            className={`border-t px-lg py-xs text-caption ${
-              degraded
-                ? 'border-accent-amber/20 bg-accent-amber/10 text-accent-amber'
-                : 'border-error/20 bg-error/10 text-[#e98b8b]'
-            }`}
-            role="status"
-          >
-            {degraded ? 'Connection lost. Nothing is being recorded until this reconnects.' : voice.error}
+        {view.tone === 'danger' && (
+          <p role="alert" className="mx-[24px] mt-md rounded-lg bg-danger-bg-dark px-[14px] py-xs text-body-md text-danger-on-dark">
+            {voice.error}
           </p>
         )}
 
-        <div className="flex items-center gap-md border-t border-white/[0.06] px-md py-sm sm:px-lg">
-          {/* the mic: start when idle, mute when live */}
-          <div className="relative shrink-0">
-            {live && HEARING.has(voice.status) && !voice.muted && (
-              <>
-                <span aria-hidden className="absolute inset-0 animate-breathe rounded-pill bg-primary" />
-                <span
-                  aria-hidden
-                  className="absolute inset-0 animate-breathe rounded-pill bg-primary [animation-delay:1.2s]"
-                />
-              </>
-            )}
-            <button
-              type="button"
-              onClick={live ? voice.toggleMute : () => void voice.connect()}
-              disabled={degraded || voice.status === 'connecting' || !voice.bound}
-              aria-label={live ? (voice.muted ? 'Unmute microphone' : 'Mute microphone') : 'Start voice session'}
-              className={`relative grid h-14 w-14 place-items-center rounded-pill transition-all duration-300 active:scale-95 disabled:opacity-60 ${
-                !live
-                  ? 'bg-primary text-on-primary shadow-[0_8px_24px_-8px_rgba(204,120,92,0.8)] hover:bg-primary-active'
-                  : voice.muted
-                    ? 'bg-white/10 text-accent-amber ring-1 ring-inset ring-accent-amber/40'
-                    : 'bg-primary text-on-primary'
-              }`}
-            >
-              {live && voice.muted ? <IconMicOff className="h-6 w-6" /> : <IconMic className="h-6 w-6" />}
-            </button>
-          </div>
+        <div className="grid min-h-[168px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-md px-[20px] py-[20px] md:gap-lg md:px-[24px]">
+          <Orb size="dock" state={view.orb} label="" />
 
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0">
             <div className="flex items-center gap-sm">
-              <p className="font-display text-[24px] leading-none text-on-dark" aria-live="polite">
-                {live ? (voice.muted ? 'Muted' : STATUS_COPY[voice.status]) : 'Voice'}
-              </p>
-              {live && <Meter status={voice.status} muted={voice.muted} />}
+              <span aria-live="polite" className={`text-eyebrow uppercase ${TONE_ON_DARK[view.tone]}`}>
+                {view.tone === 'danger' ? 'Voice error' : view.label}
+              </span>
+              <span className="truncate font-mono text-code text-on-dark-muted">{view.context}</span>
               {voice.busy && (
-                <span className="flex items-center gap-xxs text-[12px] text-on-dark-soft">
-                  <span aria-hidden className="h-1.5 w-1.5 animate-pulse-soft rounded-pill bg-primary" />
+                <span className="inline-flex items-center gap-[6px] text-caption text-on-dark-muted">
+                  <span aria-hidden className="h-[6px] w-[6px] rounded-full bg-primary-glow" />
                   saving
                 </span>
               )}
+              <Waveform running={view.wave} className="ml-auto hidden sm:flex" />
             </div>
-            <p
-              key={voice.partial ? 'partial' : lastTurn?.id ?? 'hint'}
-              className={`mt-[6px] truncate text-[14px] ${
-                voice.partial
-                  ? 'italic text-on-dark-soft'
-                  : lastTurn?.role === 'agent'
-                    ? 'animate-fade-in text-accent-teal'
-                    : lastTurn
-                      ? 'animate-fade-in text-on-dark'
-                      : 'text-on-dark-soft'
-              }`}
-            >
-              {lastTurn && !voice.partial && (
-                <span className="mr-xs text-[11px] not-italic tracking-[1px] text-on-dark-soft/60">
-                  {lastTurn.role === 'user' ? 'YOU' : 'LABLOG'}
-                </span>
-              )}
-              {caption}
+
+            <p aria-live="polite" className="mt-xs truncate text-transcript">
+              {line}
             </p>
+
+            {chips.length > 0 && (
+              <ul className="mt-sm flex flex-wrap gap-xs" aria-label="Understood">
+                {chips.map((chip, i) => (
+                  <li
+                    key={`${chip.label}-${i}`}
+                    className="inline-flex h-[28px] animate-rise items-center gap-[6px] rounded-sm border border-dark-border bg-[#2a2520] px-[10px] text-caption"
+                    style={{ animationDelay: `${i * 60}ms` }}
+                  >
+                    <span className="text-on-dark-muted">{chip.label}</span>
+                    <span className="font-semibold text-on-dark-strong">{chip.value}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
-          <div className="flex shrink-0 items-center gap-xxs">
+          <div className="flex flex-col gap-xs">
+            {voice.live && (
+              <button
+                type="button"
+                onClick={voice.toggleMute}
+                className="icon-btn-dark"
+                aria-label={voice.muted ? 'Resume listening' : 'Pause listening'}
+                title={voice.muted ? 'Resume' : 'Pause'}
+              >
+                {voice.muted ? <IconMic className="h-5 w-5" /> : <IconPause className="h-5 w-5" />}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setOpen((o) => !o)}
               aria-expanded={open}
-              className={`icon-btn-dark relative h-10 w-10 ${open ? 'bg-white/[0.08] text-on-dark' : ''}`}
+              className="icon-btn-dark relative"
               aria-label={open ? 'Hide transcript' : 'Show transcript'}
               title="Transcript"
             >
               <IconTranscript className="h-5 w-5" />
               {voice.turns.length > 0 && (
-                <span className="tabular absolute -right-[2px] -top-[2px] grid h-4 min-w-4 place-items-center rounded-pill bg-primary px-[4px] text-[10px] font-semibold text-on-primary">
+                <span className="tabular absolute -right-[4px] -top-[4px] grid h-[18px] min-w-[18px] place-items-center rounded-pill bg-primary px-[4px] text-[10px] font-semibold text-on-primary">
                   {voice.turns.length}
                 </span>
               )}
             </button>
-            {live && (
-              <button
-                type="button"
-                onClick={voice.disconnect}
-                className="btn-dark h-10 px-md"
-                aria-label="End voice session"
-              >
-                <IconStop className="h-4 w-4 text-primary" />
-                <span className="hidden sm:inline">End</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={voice.live ? voice.disconnect : voice.startVoice}
+              className="icon-btn-dark"
+              aria-label={voice.live ? 'End voice session' : 'Try voice again'}
+              title={voice.live ? 'Close' : 'Retry'}
+            >
+              {voice.live ? <IconClose className="h-5 w-5" /> : <IconMic className="h-5 w-5" />}
+            </button>
           </div>
         </div>
       </section>
-    </div>
+    </Frame>
   );
 }

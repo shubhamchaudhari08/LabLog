@@ -16,115 +16,33 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { usePageCrumbs } from '@/components/shell/AppShell';
 import { IconChevron, IconClose, IconPlus, IconTrash } from '@/components/icons';
-import { createProtocol, fetchMeasurementTypes, updateProtocol, type MeasurementType, type ProtocolDraft } from '@/lib/api';
+import { createProtocol, fetchMeasurementTypes, updateProtocol } from '@/lib/api';
+import {
+  SAMPLE_TYPES,
+  emptyForm,
+  emptyReading,
+  emptyStep,
+  fromStored,
+  keptSummary,
+  listedType,
+  needsUnit,
+  newKey,
+  serverErrors,
+  toDraft,
+  validate,
+  type Errors,
+  type Expect,
+  type FormState,
+  type ReadingDraft,
+  type SampleType,
+  type StepDraft,
+} from '@/lib/protocolForm';
 import { useProtocolList, type ProtocolSummary } from '@/lib/queries/useExperiment';
-
-interface ReadingDraft {
-  key: string;
-  type: string;
-  unit: string;
-}
-
-interface StepDraft {
-  key: string;
-  name: string;
-  readings: ReadingDraft[];
-}
-
-interface FormState {
-  protocol_code: string;
-  name: string;
-  version: string;
-  steps: StepDraft[];
-}
-
-/** Field keys for error messages: 'protocol_code', 'name', 'version', `${stepKey}.name`, `${readingKey}.type|unit`. */
-type Errors = Record<string, string>;
-
-const newKey = () => crypto.randomUUID();
-const emptyStep = (): StepDraft => ({ key: newKey(), name: '', readings: [] });
-
-/** A stored protocol back into form state: required_fields minus sample_id are the readings. */
-function fromStored(protocol: ProtocolSummary): FormState {
-  return {
-    protocol_code: protocol.protocol_code,
-    name: protocol.name,
-    version: protocol.version ?? 'v1',
-    steps: protocol.steps.map((step) => ({
-      key: newKey(),
-      name: step.name,
-      readings: (step.required_fields ?? [])
-        .filter((f) => f !== 'sample_id')
-        .map((type) => ({ key: newKey(), type, unit: step.default_unit?.[type] ?? '' })),
-    })),
-  };
-}
-
-/** What gets sent, and what "dirty" is measured against: the words and their order, never the keys. */
-function toDraft(form: FormState): ProtocolDraft {
-  return {
-    protocol_code: form.protocol_code.trim(),
-    name: form.name.trim(),
-    version: form.version.trim(),
-    steps: form.steps.map((step) => ({
-      name: step.name.trim(),
-      readings: step.readings
-        .filter((r) => r.type.trim())
-        .map((r) => (r.unit.trim() ? { type: r.type.trim(), unit: r.unit.trim() } : { type: r.type.trim() })),
-    })),
-  };
-}
-
-function listedType(types: MeasurementType[], name: string): MeasurementType | undefined {
-  const wanted = name.trim().toLowerCase();
-  return types.find((t) => t.name.toLowerCase() === wanted);
-}
-
-function validate(form: FormState): Errors {
-  const errors: Errors = {};
-  if (!form.protocol_code.trim()) errors.protocol_code = 'Give the protocol a code.';
-  else if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,31}$/.test(form.protocol_code.trim()))
-    errors.protocol_code = '2–32 letters, digits, dots, dashes or underscores, starting with a letter or digit.';
-  if (!form.name.trim()) errors.name = 'Give the protocol a name.';
-  if (!form.version.trim()) errors.version = 'Give the protocol a version.';
-  form.steps.forEach((step, i) => {
-    if (!step.name.trim()) errors[`${step.key}.name`] = `Step ${i + 1} needs a name.`;
-  });
-  return errors;
-}
-
-/** Map a server rejection onto the field it is about (contracts/protocols-api.md). */
-function serverErrors(form: FormState, error: string, message: string, detail?: Record<string, unknown>): Errors {
-  if (error === 'PROTOCOL_CODE_TAKEN') return { protocol_code: message };
-  if (error === 'INVALID_UNIT') {
-    const step = form.steps[Number(detail?.step_index)];
-    const reading = step?.readings.find((r) => r.type.trim().toLowerCase() === String(detail?.type).toLowerCase());
-    return reading ? { [`${reading.key}.unit`]: message } : { form: message };
-  }
-  if (error === 'INVALID_ARGS' && Array.isArray(detail?.errors)) {
-    const errors: Errors = {};
-    for (const e of detail.errors as { loc?: (string | number)[]; msg?: string }[]) {
-      const [head, i, field, j, sub] = e.loc ?? [];
-      const msg = e.msg ?? 'Invalid value.';
-      if (head === 'steps' && typeof i === 'number') {
-        const step = form.steps[i];
-        const reading = field === 'readings' && typeof j === 'number' ? step?.readings.filter((r) => r.type.trim())[j] : undefined;
-        if (reading) errors[`${reading.key}.${sub === 'unit' ? 'unit' : 'type'}`] = msg;
-        else if (step && field === 'name') errors[`${step.key}.name`] = msg;
-        else errors.form = msg;
-      } else if (head === 'steps') errors.form = 'Add at least one step, and no more than 200.';
-      else if (typeof head === 'string' && ['protocol_code', 'name', 'version'].includes(head)) errors[head] = msg;
-      else errors.form = msg;
-    }
-    return Object.keys(errors).length ? errors : { form: message };
-  }
-  return { form: message };
-}
 
 function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null;
   return (
-    <p id={id} className="mt-xxs text-[12px] text-error">
+    <p id={id} className="mt-xxs text-[12px] text-danger-text">
       {message}
     </p>
   );
@@ -140,7 +58,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
   const vocabulary = types.data ?? [];
 
   const [form, setForm] = useState<FormState>(() =>
-    source ? fromStored(source) : { protocol_code: '', name: '', version: 'v1', steps: [emptyStep()] },
+    source ? fromStored(source) : emptyForm(),
   );
   const [initial] = useState(() => JSON.stringify(toDraft(form)));
   const [errors, setErrors] = useState<Errors>({});
@@ -187,6 +105,10 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
     update((f) => ({ ...f, steps: f.steps.map((s) => (s.key === key ? change(s) : s)) }), clear);
   }
 
+  function updateReading(stepKey: string, readingKey: string, change: (r: ReadingDraft) => ReadingDraft, clear?: string) {
+    updateStep(stepKey, (s) => ({ ...s, readings: s.readings.map((x) => (x.key === readingKey ? change(x) : x)) }), clear);
+  }
+
   function insertStep(at: number) {
     const step = emptyStep();
     update((f) => ({ ...f, steps: [...f.steps.slice(0, at), step, ...f.steps.slice(at)] }));
@@ -210,7 +132,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
     event.preventDefault();
     if (saving) return;
 
-    const found = validate(form);
+    const found = validate(form, vocabulary);
     setErrors(found);
     if (Object.keys(found).length) {
       setFocusKey(Object.keys(found)[0]);
@@ -237,7 +159,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
     }
   }
 
-  const fieldClass = (key: string) => `input ${errors[key] ? 'border-error focus:border-error' : ''}`;
+  const fieldClass = (key: string) => `input ${errors[key] ? 'border-danger-text focus:border-danger-text' : ''}`;
   const describe = (key: string) => (errors[key] ? { 'aria-invalid': true, 'aria-describedby': `${key}-error` } : {});
 
   return (
@@ -257,7 +179,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
           </h2>
           <div className="grid gap-md sm:grid-cols-[minmax(0,1fr)_160px_120px]">
             <div>
-              <label htmlFor="name" className="mb-xxs block text-body-sm font-medium text-ink">
+              <label htmlFor="name" className="mb-xxs block text-body-md font-medium text-ink">
                 Name
               </label>
               <input
@@ -273,7 +195,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
               <FieldError id="name-error" message={errors.name} />
             </div>
             <div>
-              <label htmlFor="protocol_code" className="mb-xxs block text-body-sm font-medium text-ink">
+              <label htmlFor="protocol_code" className="mb-xxs block text-body-md font-medium text-ink">
                 Code
               </label>
               <input
@@ -290,7 +212,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
               <FieldError id="protocol_code-error" message={errors.protocol_code} />
             </div>
             <div>
-              <label htmlFor="version" className="mb-xxs block text-body-sm font-medium text-ink">
+              <label htmlFor="version" className="mb-xxs block text-body-md font-medium text-ink">
                 Version
               </label>
               <input
@@ -312,7 +234,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
             <h2 id="steps-heading" className="panel-label">
               Steps
             </h2>
-            <span className="text-caption text-muted-soft">
+            <span className="text-caption text-muted">
               {form.steps.length} {form.steps.length === 1 ? 'step' : 'steps'}
             </span>
           </div>
@@ -329,12 +251,12 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
               const nameKey = `${step.key}.name`;
               return (
                 <li key={step.key} className="card flex gap-sm p-md">
-                  <span className="mt-[26px] grid h-7 w-7 shrink-0 place-items-center rounded-pill border-[1.5px] border-muted-soft/60 text-[12px] font-medium text-body">
+                  <span className="mt-[26px] grid h-7 w-7 shrink-0 place-items-center rounded-pill border-[1.5px] border-muted/60 text-[12px] font-medium text-body">
                     {n}
                   </span>
 
                   <div className="min-w-0 flex-1">
-                    <label htmlFor={nameKey} className="mb-xxs block text-body-sm font-medium text-ink">
+                    <label htmlFor={nameKey} className="mb-xxs block text-body-md font-medium text-ink">
                       Step {n}
                     </label>
                     <input
@@ -350,7 +272,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
                     <FieldError id={`${nameKey}-error`} message={errors[nameKey]} />
 
                     <fieldset className="mt-sm">
-                      <legend className="text-caption text-muted-soft">
+                      <legend className="text-caption text-muted">
                         Readings for every sample {step.readings.length === 0 && '(none: a confirmation step)'}
                       </legend>
                       <ul className="mt-xxs space-y-xs">
@@ -371,7 +293,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
                                   className={fieldClass(typeKey)}
                                   value={reading.type}
                                   maxLength={40}
-                                  placeholder="temperature"
+                                  placeholder="What is measured"
                                   onChange={(e) =>
                                     updateStep(
                                       step.key,
@@ -395,7 +317,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
                                   </label>
                                 )}
                                 {listed?.dimensionless ? (
-                                  <p className="flex h-10 items-center px-sm text-body-sm text-muted">
+                                  <p className="flex h-10 items-center px-sm text-body-md text-muted">
                                     {listed.default_unit}
                                   </p>
                                 ) : listed ? (
@@ -418,7 +340,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
                                     }
                                     {...describe(unitKey)}
                                   >
-                                    <option value="">No default unit</option>
+                                    <option value="">{reading.expect === 'any' ? 'No default unit' : 'Choose a unit'}</option>
                                     {listed.units.map((u) => (
                                       <option key={u} value={u}>
                                         {u}
@@ -450,6 +372,13 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
                                 )}
                                 <FieldError id={`${unitKey}-error`} message={errors[unitKey]} />
                               </div>
+                              <ExpectedValue
+                                reading={reading}
+                                label={`Step ${n} reading ${r + 1}`}
+                                error={errors[`${reading.key}.expect`]}
+                                bind={bind}
+                                onChange={(change) => updateReading(step.key, reading.key, change, `${reading.key}.expect`)}
+                              />
                               <button
                                 type="button"
                                 className="icon-btn"
@@ -472,7 +401,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
                         className="btn-ghost mt-xxs h-8 px-xs text-[13px]"
                         disabled={step.readings.length >= 20}
                         onClick={() => {
-                          const reading = { key: newKey(), type: '', unit: '' };
+                          const reading = emptyReading();
                           updateStep(step.key, (s) => ({ ...s, readings: [...s.readings, reading] }));
                           setFocusKey(`${reading.key}.type`);
                         }}
@@ -480,6 +409,16 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
                         <IconPlus className="h-4 w-4" /> Add reading
                       </button>
                     </fieldset>
+
+                    <AlsoRequired
+                      step={step}
+                      n={n}
+                      errors={errors}
+                      bind={bind}
+                      onChange={(change, clear) => updateStep(step.key, change, clear)}
+                      onAddRule={(key) => setFocusKey(`${key}.count`)}
+                    />
+                    <FieldError id={`${step.key}.step-error`} message={errors[`${step.key}.step`]} />
                   </div>
 
                   <div className="flex shrink-0 flex-col gap-xxs pt-[22px]">
@@ -512,7 +451,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
                     </button>
                     <button
                       type="button"
-                      className="icon-btn hover:text-error disabled:opacity-30"
+                      className="icon-btn hover:text-danger-text disabled:opacity-30"
                       aria-label={`Remove step ${n}`}
                       disabled={form.steps.length === 1}
                       onClick={() => update((f) => ({ ...f, steps: f.steps.filter((s) => s.key !== step.key) }))}
@@ -536,7 +475,7 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
         </section>
 
         <div className="sticky bottom-0 -mx-md flex flex-wrap items-center justify-end gap-sm border-t border-hairline bg-canvas/95 px-md py-sm backdrop-blur">
-          <p aria-live="polite" className="mr-auto text-body-sm text-error">
+          <p aria-live="polite" className="mr-auto text-body-md text-danger-text">
             {errors.form}
           </p>
           <Link href="/protocols" className="btn-ghost" onClick={confirmLeave}>
@@ -548,6 +487,212 @@ function ProtocolEditor({ source }: { source?: ProtocolSummary }) {
         </div>
       </form>
     </main>
+  );
+}
+
+type Bind = (key: string) => (node: HTMLInputElement | HTMLSelectElement | null) => void;
+
+const EXPECT_LABEL: Record<Expect, string> = { any: 'Any value', exact: 'Exact value', range: 'Range' };
+
+const invalidProps = (key: string, error?: string) =>
+  error ? { 'aria-invalid': true as const, 'aria-describedby': `${key}-error` } : {};
+
+/**
+ * What a reading should be: anything, one exact value, or a range open at either
+ * end. A recorded value that misses it is saved and logged as a deviation.
+ */
+function ExpectedValue({
+  reading,
+  label,
+  error,
+  bind,
+  onChange,
+}: {
+  reading: ReadingDraft;
+  label: string;
+  error?: string;
+  bind: Bind;
+  onChange: (change: (r: ReadingDraft) => ReadingDraft) => void;
+}) {
+  const key = `${reading.key}.expect`;
+  const numberInput = (field: 'exact' | 'min' | 'max', placeholder: string, text: string) => (
+    <div className="w-[96px]">
+      <label htmlFor={`${reading.key}.${field}`} className="sr-only">
+        {label} {text}
+      </label>
+      <input
+        id={`${reading.key}.${field}`}
+        // Focus after a failed save lands on the first number of the expectation.
+        ref={field === (reading.expect === 'exact' ? 'exact' : 'min') ? bind(key) : undefined}
+        className={`input ${error ? 'border-danger-text focus:border-danger-text' : ''}`}
+        inputMode="decimal"
+        value={reading[field]}
+        placeholder={placeholder}
+        onChange={(e) => onChange((r) => ({ ...r, [field]: e.target.value }))}
+        {...invalidProps(key, error)}
+      />
+    </div>
+  );
+  return (
+    <div className="flex flex-wrap items-start gap-xs">
+      <div className="w-[128px]">
+        <label htmlFor={`${reading.key}.mode`} className="sr-only">
+          {label} expected value
+        </label>
+        <select
+          id={`${reading.key}.mode`}
+          className="input"
+          value={reading.expect}
+          onChange={(e) => onChange((r) => ({ ...r, expect: e.target.value as Expect }))}
+        >
+          {(Object.keys(EXPECT_LABEL) as Expect[]).map((mode) => (
+            <option key={mode} value={mode}>
+              {EXPECT_LABEL[mode]}
+            </option>
+          ))}
+        </select>
+      </div>
+      {reading.expect === 'exact' && numberInput('exact', 'Value', 'exact value')}
+      {reading.expect === 'range' && (
+        <>
+          {numberInput('min', 'Min', 'minimum')}
+          <span className="flex h-[44px] items-center text-body-md text-muted">to</span>
+          {numberInput('max', 'Max', 'maximum')}
+        </>
+      )}
+      {error && (
+        <p id={`${key}-error`} className="basis-full text-[12px] text-danger-text">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Requirements beyond readings: an observation per sample, deviation review, and required samples. */
+function AlsoRequired({
+  step,
+  n,
+  errors,
+  bind,
+  onChange,
+  onAddRule,
+}: {
+  step: StepDraft;
+  n: number;
+  errors: Errors;
+  bind: Bind;
+  onChange: (change: (s: StepDraft) => StepDraft, clear?: string) => void;
+  onAddRule: (key: string) => void;
+}) {
+  const kept = keptSummary(step.kept);
+  const setRule = (key: string, change: Partial<StepDraft['sampleRules'][number]>, clear: string) =>
+    onChange((s) => ({ ...s, sampleRules: s.sampleRules.map((x) => (x.key === key ? { ...x, ...change } : x)) }), clear);
+
+  return (
+    <fieldset className="mt-sm">
+      <legend className="text-caption text-muted">Also required at this step</legend>
+      <div className="mt-xxs flex flex-wrap gap-x-lg gap-y-xs">
+        <label className="flex items-center gap-xs text-body-md text-ink">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={step.observationPerSample}
+            onChange={(e) => onChange((s) => ({ ...s, observationPerSample: e.target.checked }))}
+          />
+          An observation for every sample
+        </label>
+        <label className="flex items-center gap-xs text-body-md text-ink">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={step.deviationReview}
+            onChange={(e) => onChange((s) => ({ ...s, deviationReview: e.target.checked }))}
+          />
+          Deviation review sign-off
+        </label>
+      </div>
+      {step.deviationReview && (
+        <p className="mt-xxs max-w-[64ch] text-caption text-muted">
+          Someone confirms at this step that every deviation so far was reviewed. Readings outside their expected
+          value or range are flagged as deviations automatically; this box is not needed for that.
+        </p>
+      )}
+
+      <ul className="mt-xs space-y-xs">
+        {step.sampleRules.map((rule, r) => {
+          const countKey = `${rule.key}.count`;
+          const typeKey = `${rule.key}.type`;
+          return (
+            <li key={rule.key} className="flex flex-wrap items-start gap-xs">
+              <span className="flex h-[44px] items-center text-body-md text-body">At least</span>
+              <div className="w-[80px]">
+                <label htmlFor={countKey} className="sr-only">
+                  Step {n} required samples {r + 1} count
+                </label>
+                <input
+                  id={countKey}
+                  ref={bind(countKey)}
+                  className={`input ${errors[countKey] ? 'border-danger-text focus:border-danger-text' : ''}`}
+                  inputMode="numeric"
+                  value={rule.count}
+                  onChange={(e) => setRule(rule.key, { count: e.target.value }, countKey)}
+                  {...invalidProps(countKey, errors[countKey])}
+                />
+              </div>
+              <div className="w-[120px]">
+                <label htmlFor={typeKey} className="sr-only">
+                  Step {n} required samples {r + 1} type
+                </label>
+                <select
+                  id={typeKey}
+                  ref={bind(typeKey)}
+                  className={`input ${errors[typeKey] ? 'border-danger-text focus:border-danger-text' : ''}`}
+                  value={rule.sample_type}
+                  onChange={(e) => setRule(rule.key, { sample_type: e.target.value as SampleType }, typeKey)}
+                  {...invalidProps(typeKey, errors[typeKey])}
+                >
+                  {SAMPLE_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <span className="flex h-[44px] items-center text-body-md text-body">
+                sample{rule.count.trim() === '1' ? '' : 's'}
+              </span>
+              <button
+                type="button"
+                className="icon-btn mt-[6px]"
+                aria-label={`Remove required samples ${r + 1} from step ${n}`}
+                onClick={() => onChange((s) => ({ ...s, sampleRules: s.sampleRules.filter((x) => x.key !== rule.key) }))}
+              >
+                <IconClose className="h-4 w-4" />
+              </button>
+              <div className="basis-full">
+                <FieldError id={`${countKey}-error`} message={errors[countKey]} />
+                <FieldError id={`${typeKey}-error`} message={errors[typeKey]} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <button
+        type="button"
+        className="btn-ghost mt-xxs h-8 px-xs text-[13px]"
+        disabled={step.sampleRules.length >= SAMPLE_TYPES.length}
+        onClick={() => {
+          const used = new Set(step.sampleRules.map((x) => x.sample_type));
+          const rule = { key: newKey(), sample_type: SAMPLE_TYPES.find((t) => !used.has(t)) ?? SAMPLE_TYPES[0], count: '1' };
+          onChange((s) => ({ ...s, sampleRules: [...s.sampleRules, rule] }));
+          onAddRule(rule.key);
+        }}
+      >
+        <IconPlus className="h-4 w-4" /> Add required samples
+      </button>
+      {kept && <p className="mt-xxs text-caption text-muted">{kept}</p>}
+    </fieldset>
   );
 }
 

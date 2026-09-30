@@ -67,8 +67,8 @@ function Card({
     <article
       className={`group relative flex min-h-[168px] flex-col overflow-hidden rounded-lg border p-lg transition-all duration-300 ${
         isControl
-          ? 'border-hairline bg-surface-card/70'
-          : 'border-hairline bg-canvas shadow-panel hover:shadow-lift'
+          ? 'border-hairline bg-surface-muted/70'
+          : 'border-hairline bg-canvas  hover:shadow-tile-lift'
       }`}
     >
       <header className="flex items-start justify-between gap-xs">
@@ -76,7 +76,7 @@ function Card({
           {sample.sample_code}
         </span>
         {isControl && (
-          <span className="text-caption-upper uppercase text-muted-soft">control</span>
+          <span className="text-eyebrow uppercase text-muted">control</span>
         )}
       </header>
 
@@ -101,18 +101,18 @@ function Card({
                   was {primary.previous ?? previousById[primary.type] ?? '—'}
                 </span>
               )}
-              {primary.optimistic && <span className="text-muted-soft">saving…</span>}
+              {primary.optimistic && <span className="text-muted">saving…</span>}
             </p>
           </div>
 
           {rest.length > 0 && (
             <ul className="mt-md space-y-xxs border-t border-hairline-soft pt-xs">
               {rest.map((r) => (
-                <li key={r.type} className="flex justify-between text-body-sm">
+                <li key={r.type} className="flex justify-between text-body-md">
                   <span className="capitalize text-muted">{r.type}</span>
                   <span className="tabular text-ink">
                     {r.value}
-                    <span className="ml-xxs text-muted-soft">{r.unit}</span>
+                    <span className="ml-xxs text-muted">{r.unit}</span>
                   </span>
                 </li>
               ))}
@@ -122,7 +122,7 @@ function Card({
       ) : (
         <div className="mt-auto">
           <p className="font-display text-[44px] leading-none text-hairline">—</p>
-          <p className="mt-xxs text-caption text-muted-soft">No reading yet</p>
+          <p className="mt-xxs text-caption text-muted">No reading yet</p>
         </div>
       )}
     </article>
@@ -156,7 +156,7 @@ export function SampleBoard({
 
   if (samples.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-hairline px-lg py-xl text-body-sm text-muted-soft">
+      <p className="rounded-lg border border-dashed border-hairline px-lg py-xl text-body-md text-muted">
         No samples registered for this experiment.
       </p>
     );

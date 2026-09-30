@@ -26,8 +26,15 @@ import { startMicCapture, type MicCapture } from './audio/micWorklet';
 export interface UseVoiceAgentOptions {
   /** Empty: a desk session with no experiment open (specs/003). */
   experimentId: string;
+  /**
+   * Called when the agent asks for a tool, before POST /tools. The session uses
+   * it to remember what the user had just said (specs/005 data-model §8).
+   */
+  onToolDispatch?: (callId: string, tool: string) => void;
   /** Called on a successful tool result, for the optimistic cache patch. */
-  onToolSuccess?: (tool: string, data: Record<string, unknown>) => void;
+  onToolSuccess?: (tool: string, data: Record<string, unknown>, callId: string) => void;
+  /** Called when starting a session failed, so microphone problems update the mic state. */
+  onStartError?: (cause: unknown) => void;
 }
 
 export interface VoiceAgentState {
@@ -42,14 +49,46 @@ export interface VoiceAgentState {
   disconnect: () => void;
   muted: boolean;
   toggleMute: () => void;
+  /** Between input.speech.started and the user's committed transcript (specs/004). */
+  userSpeaking: boolean;
+  /**
+   * Ask the agent to speak now, with server-authored instructions (specs/004
+   * contracts/voice-announcement.md). Returns false when nothing was sent.
+   */
+  sendReplyCreate: (instructions: string) => boolean;
+  /**
+   * Drop microphone frames between two device-clock instants, so a timer alarm
+   * is never heard as speech (specs/004 FR-315). A time window rather than a
+   * toggle: frames arrive on the audio thread, which background tabs do not
+   * throttle, while a setTimeout to un-mute would be.
+   */
+  muteMicBetween: (fromMs: number, toMs: number) => void;
+  /** When the last session.error/error arrived, for the announcement's failure check. */
+  lastErrorAt: number | null;
+  /** Device time of the first session.ready of this session; null when idle (specs/005). */
+  sessionStartedAt: number | null;
+  /** The text of the user's last committed turn, read at call time (specs/005). */
+  lastUserUtterance: () => string | null;
 }
 
 let turnSeq = 0;
 const nextTurnId = () => `turn-${++turnSeq}`;
 
+/** Microphone failures in words the user can act on (specs/005 DESIGN.md D-16). */
+function micErrorMessage(cause: unknown): string | null {
+  const name = cause instanceof Error || cause instanceof DOMException ? cause.name : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return 'Microphone blocked — allow it in the address bar, then try again.';
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'No microphone found.';
+  return null;
+}
+
 export function useVoiceAgent({
   experimentId,
+  onToolDispatch,
   onToolSuccess,
+  onStartError,
 }: UseVoiceAgentOptions): VoiceAgentState {
   const [status, setStatus] = useState<VoiceStatusValue>('idle');
   const [turns, setTurns] = useState<TranscriptTurn[]>([]);
@@ -58,6 +97,11 @@ export function useVoiceAgent({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [userSpeaking, setUserSpeaking] = useState(false);
+  const [lastErrorAt, setLastErrorAt] = useState<number | null>(null);
+  const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
+  const lastUserTextRef = useRef<string | null>(null);
+  const alarmWindowsRef = useRef<Array<[number, number]>>([]);
 
   const socketRef = useRef<WebSocket | null>(null);
   const playerRef = useRef<AgentAudioPlayer | null>(null);
@@ -78,6 +122,7 @@ export function useVoiceAgent({
 
   const appendTurn = useCallback((role: 'user' | 'agent', text: string) => {
     if (!text.trim()) return;
+    if (role === 'user') lastUserTextRef.current = text;
     setTurns((prev) => [...prev, { id: nextTurnId(), role, text, at: Date.now() }]);
   }, []);
 
@@ -89,6 +134,7 @@ export function useVoiceAgent({
       const buffer = bufferRef.current;
       buffer?.registerCall(callId);
       setBusy(true);
+      onToolDispatch?.(callId, name);
 
       let outcome: ToolOutcome;
       try {
@@ -99,6 +145,8 @@ export function useVoiceAgent({
           args,
           experiment_id: experimentId || null,
           session_id: sessionIdRef.current,
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone ?? null,
+          utterance: lastUserTextRef.current,
         });
       } catch {
         // Never silence. An unanswered tool.call leaves the agent waiting until
@@ -106,12 +154,12 @@ export function useVoiceAgent({
         outcome = TRANSPORT_ERROR as unknown as ToolOutcome;
       }
 
-      if (outcome.success && onToolSuccess) onToolSuccess(name, outcome.data);
+      if (outcome.success && onToolSuccess) onToolSuccess(name, outcome.data, callId);
 
       buffer?.completeCall(callId, outcome);
       setBusy((buffer?.inFlight ?? 0) > 0);
     },
-    [experimentId, onToolSuccess],
+    [experimentId, onToolDispatch, onToolSuccess],
   );
 
   // -------------------------------------------------------------------------
@@ -125,12 +173,15 @@ export function useVoiceAgent({
           retriesRef.current = 0;
           sessionIdRef.current = message.session_id;
           setSessionId(message.session_id);
+          // A resumed session keeps its start time; only a new one sets it.
+          setSessionStartedAt((current) => current ?? Date.now());
           setStatus('listening');
           break;
 
         case 'input.speech.started':
           // Softer barge-in hint. The authoritative signal is reply.done.
           if (playerRef.current?.isPlaying) playerRef.current.flush();
+          setUserSpeaking(true);
           setStatus('listening');
           break;
 
@@ -143,11 +194,13 @@ export function useVoiceAgent({
           break;
 
         case 'transcript.user':
+          setUserSpeaking(false);
           setPartial('');
           appendTurn('user', message.text);
           break;
 
         case 'reply.started':
+          setUserSpeaking(false);
           bufferRef.current?.openTurn(message.reply_id);
           setStatus('speaking');
           break;
@@ -175,6 +228,7 @@ export function useVoiceAgent({
 
         case 'session.error':
         case 'error':
+          setLastErrorAt(Date.now());
           if (
             (message.code === 'session_not_found' || message.code === 'session_expired') &&
             configRef.current
@@ -182,6 +236,7 @@ export function useVoiceAgent({
             // Resume failed: start a fresh session and say so, rather than
             // pretend the conversation survived.
             sessionIdRef.current = null;
+            setSessionStartedAt(null);
             send({ type: 'session.update', session: configRef.current });
             setError('The previous conversation could not be resumed; started a new one.');
             break;
@@ -257,6 +312,7 @@ export function useVoiceAgent({
         // or its close would look like a dropped connection and trigger a reconnect.
         if (socketRef.current !== socket) return;
         readyRef.current = false;
+        setUserSpeaking(false);
         void micRef.current?.stop();
         micRef.current = null;
         playerRef.current?.flush();
@@ -278,7 +334,10 @@ export function useVoiceAgent({
       };
 
       micRef.current = await startMicCapture((base64Pcm) => {
-        if (readyRef.current) send({ type: 'input.audio', audio: base64Pcm });
+        if (!readyRef.current) return;
+        const now = Date.now();
+        if (alarmWindowsRef.current.some(([from, to]) => now >= from && now < to)) return;
+        send({ type: 'input.audio', audio: base64Pcm });
       });
 
       // session.ready may already have moved us to "listening".
@@ -286,10 +345,11 @@ export function useVoiceAgent({
     } catch (cause) {
       deliberateCloseRef.current = true;
       socketRef.current?.close();
-      setError(cause instanceof Error ? cause.message : 'Could not start the voice session.');
+      setError(micErrorMessage(cause) ?? (cause instanceof Error ? cause.message : 'Could not start the voice session.'));
       setStatus('error');
+      onStartError?.(cause);
     }
-  }, [experimentId, handleMessage, send]);
+  }, [experimentId, handleMessage, send, onStartError]);
   connectRef.current = connect;
 
   const disconnect = useCallback(() => {
@@ -303,9 +363,13 @@ export function useVoiceAgent({
     socketRef.current = null;
     sessionIdRef.current = null;
     setSessionId(null);
+    setSessionStartedAt(null);
+    lastUserTextRef.current = null;
     setStatus('idle');
     setPartial('');
   }, [send]);
+
+  const lastUserUtterance = useCallback(() => lastUserTextRef.current, []);
 
   const toggleMute = useCallback(() => {
     setMuted((previous) => {
@@ -313,6 +377,18 @@ export function useVoiceAgent({
       micRef.current?.setMuted(next);
       return next;
     });
+  }, []);
+
+  const sendReplyCreate = useCallback((instructions: string) => {
+    const socket = socketRef.current;
+    if (!readyRef.current || socket?.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify({ type: 'reply.create', instructions }));
+    return true;
+  }, []);
+
+  const muteMicBetween = useCallback((fromMs: number, toMs: number) => {
+    const now = Date.now();
+    alarmWindowsRef.current = [...alarmWindowsRef.current.filter(([, to]) => to > now), [fromMs, toMs]];
   }, []);
 
   useEffect(() => {
@@ -334,5 +410,11 @@ export function useVoiceAgent({
     disconnect,
     muted,
     toggleMute,
+    userSpeaking,
+    sendReplyCreate,
+    muteMicBetween,
+    lastErrorAt,
+    sessionStartedAt,
+    lastUserUtterance,
   };
 }

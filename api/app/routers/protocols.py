@@ -45,17 +45,25 @@ def _stored_steps(steps: list[ProtocolStepIn]) -> list[dict[str, Any]]:
     Index and id come from position, never from the client (FR-105). Listed
     reading types take the vocabulary's spelling, so "ph" is stored as "pH" and
     matches what the voice tools look up; unlisted types are stored as given.
+
+    A reading with an exact value or range also becomes a structured measurement
+    requirement (specs/007); `required_fields`/`default_unit` stay as before, so
+    anything that reads only those sees the same protocol.
     """
     stored = []
     for index, step in enumerate(steps):
         types: list[str] = []
         units: dict[str, str] = {}
+        expectations: list[dict[str, Any]] = []
         for reading in step.readings:
             listed = vocabulary.lookup(reading.type)
             name = listed.name if listed else reading.type
             if name in types:
                 continue
             types.append(name)
+            expected = reading.requirement()
+            if expected:
+                expectations.append(expected.model_dump(exclude_none=True))
             unit = reading.unit or (listed.default_unit if listed and listed.dimensionless else None)
             if unit:
                 units[name] = unit
@@ -68,6 +76,14 @@ def _stored_steps(steps: list[ProtocolStepIn]) -> list[dict[str, Any]]:
         }
         if units:
             row["default_unit"] = units
+        # specs/007: structured requirements and a window, stored only when given,
+        # so a readings-only protocol is stored exactly as before.
+        requirements = expectations + [r.model_dump(exclude_none=True) for r in step.requirements]
+        if requirements:
+            row["requirements"] = requirements
+        for key in ("expected_duration_seconds", "min_duration_seconds", "max_duration_seconds"):
+            if getattr(step, key) is not None:
+                row[key] = getattr(step, key)
         stored.append(row)
     return stored
 
@@ -97,7 +113,7 @@ def _validated(body: dict[str, Any]) -> tuple[CreateProtocolRequest | None, dict
         return None, _fail(
             "INVALID_ARGS",
             "Some protocol fields are missing or invalid.",
-            errors=exc.errors(include_url=False),
+            errors=exc.errors(include_url=False, include_context=False),
         )
     for index, step in enumerate(request.steps):
         for reading in step.readings:

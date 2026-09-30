@@ -27,7 +27,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { useVoiceAgent, type VoiceAgentState } from './useVoiceAgent';
-import { applyOptimisticToolResult } from '@/lib/queries/useExperiment';
+import { useMicPermission } from './useMicPermission';
+import { classifyMicError, type MicReadiness } from '@/lib/voiceClient/micReadiness';
+import { applyOptimisticToolResult, keys } from '@/lib/queries/useExperiment';
+import { MUTATING_TOOLS } from '@/lib/ui/intentChips';
+import { openAction } from '@/lib/history';
 import type { VoiceStatusValue } from '@/lib/voiceClient/types';
 
 export interface BoundExperiment {
@@ -50,6 +54,24 @@ interface VoiceSessionValue extends VoiceAgentState {
   switchTo: (experiment: BoundExperiment) => void;
   /** Set while a desk session is handing over to an experiment it just created or started. */
   switching: BoundExperiment | null;
+  // --- specs/005 contracts/ui-voice-surfaces.md §9 -------------------------
+  /** Device time of the last successful outcome of a tool that changes the record. */
+  understoodAt: number | null;
+  lastOutcome: { tool: string; data: Record<string, unknown>; at: number } | null;
+  /** Entity key → the words that produced it (data-model §8). Display only. */
+  quotes: ReadonlyMap<string, string>;
+  quotesVersion: number;
+  /** A "Say: …" prompt shown in the dock and on the bench. */
+  hint: string | null;
+  setHint: (text: string | null) => void;
+  // --- microphone readiness (specs/005 follow-up, ui-voice-surfaces §7) ------
+  /** Whether voice can start, and if not, what the user must fix. */
+  mic: MicReadiness;
+  /** Ask for the microphone now (shows the browser prompt when it can). */
+  requestMic: () => Promise<boolean>;
+  /** Set when an attempt to start voice was refused for want of a microphone. */
+  micNotice: string | null;
+  dismissMicNotice: () => void;
 }
 
 const VoiceContext = createContext<VoiceSessionValue | null>(null);
@@ -69,7 +91,30 @@ const HANDOVER_TOOLS = new Set(['create_experiment', 'start_experiment']);
 const AFTER_REPLY_TIMEOUT_MS = 10_000;
 
 /** What to do once the agent has finished speaking about a tool result. */
-type AfterReply = { switchTo: BoundExperiment } | { end: true };
+type AfterReply = { switchTo: BoundExperiment } | { end: true } | { navigate: string };
+
+/**
+ * Where a stored result's quote is filed, so the capture log can find it by
+ * the event it produced (data-model §8). Step completions carry no id in their
+ * result, so they are filed by the step index read at dispatch.
+ */
+function quoteKeys(tool: string, data: Record<string, unknown>, stepIndex: number | null): string[] {
+  const ids = (...values: unknown[]) => values.filter((v): v is string => typeof v === 'string');
+  switch (tool) {
+    case 'record_measurement':
+    case 'correct_measurement':
+      return ids(data.measurement_id);
+    case 'record_observation':
+      // "All samples" stores one note per sample; each carries the same words.
+      return Array.isArray(data.observation_ids) ? ids(...data.observation_ids) : ids(data.observation_id);
+    case 'create_deviation':
+      return ids(data.deviation_id);
+    case 'complete_protocol_step':
+      return stepIndex != null ? [`step:${stepIndex}`] : [];
+    default:
+      return [];
+  }
+}
 
 export function VoiceSessionProvider({ children }: { children: React.ReactNode }) {
   const client = useQueryClient();
@@ -82,11 +127,43 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
   boundRef.current = bound;
   const experimentId = bound?.id ?? '';
 
+  const [lastOutcome, setLastOutcome] = useState<VoiceSessionValue['lastOutcome']>(null);
+  const [hint, setHint] = useState<string | null>(null);
+  const quotesRef = useRef(new Map<string, string>());
+  const [quotesVersion, setQuotesVersion] = useState(0);
+  /** callId → what was known when the agent asked for the tool. */
+  const pendingRef = useRef(new Map<string, { utterance: string | null; stepIndex: number | null }>());
+  const utteranceRef = useRef<() => string | null>(() => null);
+
+  const onToolDispatch = useCallback(
+    (callId: string) => {
+      const id = boundRef.current?.id;
+      const experiment = id
+        ? (client.getQueryData(keys.experiment(id)) as { current_step_index?: number } | undefined)
+        : undefined;
+      pendingRef.current.set(callId, {
+        utterance: utteranceRef.current(),
+        stepIndex: experiment?.current_step_index ?? null,
+      });
+    },
+    [client],
+  );
+
   // The optimistic patch: one frame after the tool returns, well before the
   // change stream catches up. This ordering is the hero moment — if the spoken
   // confirmation lands first, the effect is lost (research.md R-007).
   const onToolSuccess = useCallback(
-    (tool: string, data: Record<string, unknown>) => {
+    (tool: string, data: Record<string, unknown>, callId: string) => {
+      const pending = pendingRef.current.get(callId);
+      pendingRef.current.delete(callId);
+      if (MUTATING_TOOLS.has(tool)) {
+        setLastOutcome({ tool, data, at: Date.now() });
+        const quoted = quoteKeys(tool, data, pending?.stepIndex ?? null);
+        if (quoted.length && pending?.utterance) {
+          for (const key of quoted) quotesRef.current.set(key, pending.utterance);
+          setQuotesVersion((v) => v + 1);
+        }
+      }
       if (experimentId) applyOptimisticToolResult(client, experimentId, tool, data);
       // The tool.result goes out first (the agent must hear it); the switch or
       // the hang-up waits for the agent to finish saying what happened.
@@ -94,6 +171,14 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
         heardReply.current = false;
         setAfterReply({ switchTo: { id: data.experiment_id, code: String(data.experiment_code ?? '') } });
         void client.invalidateQueries({ queryKey: ['experiments'] });
+      } else if (!boundRef.current && tool === 'search_experiments') {
+        // "Open X" with one match (specs/006 US3). Opening changes no state, so
+        // a running run hands over like a resume and anything else just navigates.
+        const action = openAction(data.opened);
+        if (action) {
+          heardReply.current = false;
+          setAfterReply(action);
+        }
       } else if (boundRef.current && tool === 'complete_experiment') {
         heardReply.current = false;
         setAfterReply({ end: true });
@@ -102,8 +187,33 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
     [client, experimentId],
   );
 
-  const voice = useVoiceAgent({ experimentId, onToolSuccess });
+  const mic = useMicPermission();
+  const [micRefused, setMicRefused] = useState(false);
+  const { noteFailure } = mic;
+  // Permission can be granted while the OS has the microphone off; that only
+  // shows when a session tries to open it. Treat it like any other mic problem.
+  const onStartError = useCallback(
+    (cause: unknown) => {
+      noteFailure(cause);
+      if (classifyMicError(cause)) setMicRefused(true);
+    },
+    [noteFailure],
+  );
+  const voice = useVoiceAgent({ experimentId, onToolDispatch, onToolSuccess, onStartError });
+  utteranceRef.current = voice.lastUserUtterance;
   const live = LIVE_STATES.has(voice.status);
+
+  // Everything above is about one session: forget it when the session ends.
+  useEffect(() => {
+    if (voice.status !== 'idle') return;
+    setLastOutcome(null);
+    setHint(null);
+    pendingRef.current.clear();
+    if (quotesRef.current.size) {
+      quotesRef.current = new Map();
+      setQuotesVersion((v) => v + 1);
+    }
+  }, [voice.status]);
   const liveRef = useRef(live);
   liveRef.current = live;
 
@@ -133,9 +243,11 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
   const act = useCallback(
     (action: AfterReply) => {
       if ('switchTo' in action) switchTo(action.switchTo);
+      // The desk session stays live: it can keep searching from the opened page.
+      else if ('navigate' in action) router.push(action.navigate);
       else disconnect();
     },
-    [switchTo, disconnect],
+    [switchTo, disconnect, router],
   );
 
   // Act once the agent has spoken its confirmation and gone quiet.
@@ -145,8 +257,8 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
     const done = heardReply.current && voice.status === 'listening' && !voice.busy;
     if (done || !live) {
       setAfterReply(null);
-      // A dropped line has already ended the session; a pending switch still happens.
-      if (live || 'switchTo' in afterReply) act(afterReply);
+      // A dropped line has already ended the session; a pending switch or open still happens.
+      if (live || !('end' in afterReply)) act(afterReply);
     }
   }, [afterReply, voice.status, voice.busy, live, act]);
 
@@ -175,14 +287,36 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
     setBound((current) => (current?.id === id ? null : current));
   }, []);
 
-  const startVoice = useCallback(() => {
+  // Every way of starting voice comes through here, so the microphone is
+  // checked once: ask for it if the browser can, and if it still cannot be
+  // used, say what to fix instead of opening a session that cannot hear.
+  const micReadyRef = useRef(mic.readiness.ready);
+  micReadyRef.current = mic.readiness.ready;
+  const { request: requestMic } = mic;
+  const startVoice = useCallback(async () => {
     if (liveRef.current) return;
+    const ok = micReadyRef.current || (await requestMic());
+    if (!ok) {
+      setMicRefused(true);
+      return;
+    }
+    setMicRefused(false);
     connectFor(boundRef.current);
-  }, [connectFor]);
+  }, [connectFor, requestMic]);
 
+  // Fixed (permission granted, microphone connected): the notice has done its job.
+  useEffect(() => {
+    if (mic.readiness.ready) setMicRefused(false);
+  }, [mic.readiness.ready]);
+  const dismissMicNotice = useCallback(() => setMicRefused(false), []);
+
+  const micNotice = micRefused && !mic.readiness.ready ? mic.readiness.message : null;
   const value = useMemo(
     () => ({
       ...voice,
+      // A microphone problem is explained by the mic notice, which says what to
+      // fix; the raw start error would only repeat it less helpfully.
+      error: micNotice ? null : voice.error,
       bound,
       live,
       mode: (bound ? 'bench' : 'desk') as 'desk' | 'bench',
@@ -191,8 +325,34 @@ export function VoiceSessionProvider({ children }: { children: React.ReactNode }
       startVoice,
       switchTo,
       switching: afterReply && 'switchTo' in afterReply ? afterReply.switchTo : null,
+      understoodAt: lastOutcome?.at ?? null,
+      lastOutcome,
+      quotes: quotesRef.current,
+      quotesVersion,
+      hint,
+      setHint,
+      mic: mic.readiness,
+      requestMic,
+      micNotice,
+      dismissMicNotice,
     }),
-    [voice, bound, live, bind, unbind, startVoice, switchTo, afterReply],
+    [
+      voice,
+      bound,
+      live,
+      bind,
+      unbind,
+      startVoice,
+      switchTo,
+      afterReply,
+      lastOutcome,
+      quotesVersion,
+      hint,
+      mic.readiness,
+      requestMic,
+      micNotice,
+      dismissMicNotice,
+    ],
   );
 
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>;
@@ -216,12 +376,12 @@ export const STATUS_COPY: Record<VoiceStatusValue, string> = {
 };
 
 export const STATUS_DOT: Record<VoiceStatusValue, string> = {
-  idle: 'bg-muted-soft',
-  connecting: 'bg-accent-amber',
-  ready: 'bg-accent-teal',
-  listening: 'bg-accent-teal',
-  thinking: 'bg-accent-amber',
-  speaking: 'bg-primary',
-  reconnecting: 'bg-accent-amber',
-  error: 'bg-error',
+  idle: 'bg-on-dark-muted',
+  connecting: 'bg-on-dark-muted',
+  ready: 'bg-status-running-on-dark',
+  listening: 'bg-primary-glow',
+  thinking: 'bg-primary-glow',
+  speaking: 'bg-primary-glow',
+  reconnecting: 'bg-deviation-on-dark',
+  error: 'bg-danger-on-dark',
 };

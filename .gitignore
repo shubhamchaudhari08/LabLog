@@ -39,5 +39,8 @@ Thumbs.db
 .vscode/
 .idea/
 
+# ---- Launch video render (267 MB; upload the mp4 to the submission, not git) ----
+brag-output/
+
 # ---- Throwaway spike (Stream P, deleted before submission) ----
 spike/out/

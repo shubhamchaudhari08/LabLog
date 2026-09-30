@@ -16,7 +16,9 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from .audit import write_event
+from .db import load_protocol
 from .samples import add_samples
+from .tools import requirements as reqs
 
 CODE_RETRIES = 3
 
@@ -63,6 +65,7 @@ def create_experiment(
     sample_codes: list[str],
     session_id: str | None = None,
     source: Literal["ui", "voice"],
+    sample_types: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Insert the experiment (READY with a protocol, else DRAFT), its samples, and their events."""
     status = "READY" if protocol else "DRAFT"
@@ -107,11 +110,69 @@ def create_experiment(
         actor_id=user_id,
         voice_session_id=session_id,
     )
-    samples = add_samples(sb, experiment, sample_codes, actor_id=user_id, session_id=session_id, source=source)
+    samples = add_samples(
+        sb, experiment, sample_codes, actor_id=user_id, session_id=session_id, source=source, sample_types=sample_types
+    )
     return experiment, samples
 
 
-def start_error(experiment: dict[str, Any]) -> dict[str, Any] | None:
+def _samples_phrase(count: int, sample_type: str) -> str:
+    return f"{count} {sample_type} sample{'' if count == 1 else 's'}"
+
+
+def sample_shortfall(protocol: dict[str, Any] | None, samples: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """SAMPLES_REQUIRED, or None when the samples meet what the protocol asks for.
+
+    Samples can only be added when an experiment is created, so a run that starts
+    short can never be completed (specs/007 FR-713, research R-721). `samples` are
+    {code, sample_type}. Per type the LARGEST count any step asks for is needed,
+    not the sum; and a protocol that records anything "for every sample" needs at
+    least one. A malformed step is skipped here, as while recording: completeness
+    reports it as PROTOCOL_INVALID.
+    """
+    needed: dict[str, int] = {}
+    every_sample = False
+    for step in (protocol or {}).get("steps") or []:
+        try:
+            found = reqs.step_requirements(step)
+        except reqs.InvalidProtocol:
+            continue
+        for req in found:
+            if isinstance(req, reqs.SampleRequirement):
+                needed[req.sample_type] = max(needed.get(req.sample_type, 0), req.count)
+            elif isinstance(req, (reqs.MeasurementRequirement, reqs.ObservationRequirement)):
+                every_sample = every_sample or req.scope == "all_samples"
+
+    have = {t: sum(1 for s in samples if str(s.get("sample_type") or "").casefold() == t) for t in needed}
+    short = [{"sample_type": t, "count": n, "have": have[t]} for t, n in needed.items() if have[t] < n]
+    empty = every_sample and not samples
+    if not short and not empty:
+        return None
+
+    if short:
+        wants = " and ".join(_samples_phrase(n, t) for t, n in needed.items())
+        got = " and ".join(_samples_phrase(have[t], t) for t in needed if have[t]) or "none of them"
+        message = f"This protocol needs at least {wants}; the list has {got}."
+    else:
+        message = "This protocol records readings for every sample, so list at least one sample."
+    return {
+        "error": "SAMPLES_REQUIRED",
+        "message": message,
+        "detail": {"needed": short, "any_sample": empty},
+    }
+
+
+def active_samples(sb, experiment_id: str) -> list[dict[str, Any]]:
+    """The run's samples as {code, sample_type}, as sample_shortfall reads them."""
+    rows = sb.table("samples").select("*").eq("experiment_id", experiment_id).execute().data or []
+    return [
+        {"code": r["sample_code"], "sample_type": r.get("sample_type")}
+        for r in rows
+        if r.get("status", "active") == "active"
+    ]
+
+
+def start_error(sb, experiment: dict[str, Any]) -> dict[str, Any] | None:
     """Why this experiment cannot start, as an error body, or None if it can."""
     if not experiment.get("protocol_id"):
         return {
@@ -124,7 +185,8 @@ def start_error(experiment: dict[str, Any]) -> dict[str, Any] | None:
             "message": f"{experiment['experiment_code']} is {str(experiment.get('status')).lower()}, so it cannot be started.",
             "detail": {"status": experiment.get("status")},
         }
-    return None
+    # A READY run made before samples were checked at creation (research R-721).
+    return sample_shortfall(load_protocol(sb, experiment["protocol_id"]), active_samples(sb, experiment["id"]))
 
 
 def start_experiment(sb, *, experiment: dict[str, Any], user_id: str, session_id: str | None = None) -> dict[str, Any]:

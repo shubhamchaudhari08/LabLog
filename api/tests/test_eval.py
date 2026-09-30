@@ -2,7 +2,7 @@
 
 from eval.run import aggregate, execute, score
 from eval.scenarios import SCENARIOS
-from tests.conftest import seeded_store
+from tests.conftest import seed_history, seeded_store
 from app.tools.models import TOOL_REGISTRY
 
 CORRECTION = next(s for s in SCENARIOS if s["id"] == "corr_02")
@@ -17,7 +17,7 @@ def test_corpus_is_large_enough_and_setups_succeed():
     assert len(SCENARIOS) >= 30
     for scenario in SCENARIOS:
         assert scenario["expect"].get("tool") in (None, *TOOL_REGISTRY)
-        sb = seeded_store()
+        sb = seed_history(seeded_store()) if scenario.get("history_runs") else seeded_store()
         for name, args in scenario.get("setup", []):
             assert execute(sb, sb.rows("experiments")[0], name, args)["success"], scenario["id"]
 
@@ -188,7 +188,7 @@ def test_desk_scenarios_run_under_the_desk_profile_without_the_network(monkeypat
     desk = next(s for s in SCENARIOS if s["id"] == "desk_01")
     calls, text = run.converse("m", "k", desk)
 
-    assert seen["tools"] == ["list_protocols", "create_experiment", "start_experiment"]
+    assert seen["tools"] == ["list_protocols", "search_experiments", "create_experiment", "start_experiment"]
     assert "No experiment is open yet" in seen["system"]
     assert calls == [] and score(desk, calls, text)["passed"]
 
@@ -198,3 +198,113 @@ def test_desk_execute_routes_by_scope():
     resumed = execute(sb, None, "start_experiment", {"experiment_ref": "STAB-104", "confirmed": False})
     assert resumed["success"] and resumed["data"]["already_running"] is True
     assert execute(sb, None, "record_measurement", {"sample_code": "A17", "measurement_type": "temperature", "value": 4.2})["error"] == "EXPERIMENT_REQUIRED"
+
+
+# -- specs/004-step-timers: harness support for timer scenarios (T011, T012a, T037) --
+
+
+def timer_call(action="start", seconds=600, **args):
+    timer = {"timer_id": "t1", "state": "running", "duration_seconds": seconds}
+    return ("step_timer", {"action": action, **args}, ok(timer=timer, current_step_index=2))
+
+
+def test_matches_reads_the_nested_stored_timer():
+    scenario = {"id": "t", "category": "timer", "utterance": "", "expect": {
+        "tool": "step_timer", "args": {"action": "start", "duration_seconds": 600}}}
+    assert score(scenario, [timer_call(seconds=600)], "Timer started.")["passed"]
+    assert not score(scenario, [timer_call(seconds=6000)], "Timer started.")["passed"]
+
+
+def test_offer_expectation_reads_the_reply_and_forbids_a_start():
+    offer = {"id": "o", "category": "timer", "utterance": "", "expect": {"offer": True}}
+    no_offer = {"id": "n", "category": "timer", "utterance": "", "expect": {"offer": False}}
+    assert score(offer, [], "This step is timed, 10 minutes. Shall I start the timer?")["passed"]
+    assert not score(offer, [], "Step 3 is Centrifuge.")["passed"]
+    # Starting without the user's yes is not an offer (FR-309).
+    assert not score(offer, [timer_call()], "Timer started.")["passed"]
+    # "timed" is not "timer": mentioning a timed next step is not an offer.
+    assert score(no_offer, [], "The next step is timed, 10 minutes.")["passed"]
+    assert not score(no_offer, [], "Shall I start the timer?")["passed"]
+
+
+def test_timer_status_is_a_read_not_a_write():
+    clarify = {"id": "c", "category": "timer", "utterance": "", "expect": {"clarify": True}}
+    assert not score(clarify, [timer_call("status")], "6 minutes left.")["false_record"]
+    assert score(clarify, [timer_call("start")], "Started.")["false_record"]
+
+
+def test_by_profile_accuracy_ignores_timer_scenarios():
+    timer = {"id": "t", "category": "timer", "utterance": "", "expect": {"clarify": True}}
+    rows = _rows() + [(timer, score(timer, [timer_call()], ""), [timer_call()], "")]
+    metrics = aggregate(rows, "m")
+    assert metrics["by_profile"]["bench"]["total"] == 2  # the timer scenario is not counted
+    assert metrics["by_profile"]["bench"] == aggregate(_rows(), "m")["by_profile"]["bench"]
+
+
+def test_scenarios_can_move_the_run_before_the_prompt_is_built(monkeypatch):
+    import eval.run as run
+    from tests.conftest import TIMED_STEPS
+
+    seen = {}
+
+    class Reply:
+        is_error = False
+
+        def json(self):
+            return {"choices": [{"message": {"content": "This step is timed. Shall I start the timer?"}}]}
+
+    def fake_post(url, headers, json, timeout):
+        seen["system"] = json["messages"][0]["content"]
+        seen["opening"] = json["messages"][2]["content"]
+        return Reply()
+
+    monkeypatch.setattr(run.httpx, "post", fake_post)
+    scenario = {"id": "m", "category": "timer", "utterance": "What step am I on?",
+                "expect": {"offer": True}, "steps": TIMED_STEPS, "at_step": 2}
+    run.converse("m", "k", scenario)
+    assert "Centrifuge at 4,000 rpm for 10 minutes" in seen["system"]
+    assert "Step 3 of 6: Centrifuge" in seen["opening"]
+
+
+# ---------------------------------------------------------------------------
+# specs/006 T019: comparison replies may only speak the backend's numbers (SC-401).
+# ---------------------------------------------------------------------------
+
+COMPARE = {
+    "id": "cmp_test", "category": "comparison", "utterance": "How does that compare with the previous run?",
+    "expect": {"tool": "get_sample_history", "args": {"sample_code": "A17", "compare_previous": True},
+               "spoken": ["4.4", "0.1", "lower"]},
+}
+COMPARISON = {
+    "current": 4.3, "previous": 4.4, "magnitude": 0.1, "pct": -2.3, "direction": "lower",
+    "current_step": {"index": 1, "name": "Record initial temperature"},
+    "previous_step": {"index": 1, "name": "Record initial temperature"},
+}
+CALLS = [("get_sample_history", {"sample_code": "A17", "compare_previous": True},
+          ok(sample_code="A17", measurements=[], observations=[], comparison=COMPARISON))]
+
+
+def test_a_reply_with_only_backend_numbers_passes():
+    r = score(COMPARE, CALLS, "In STAB-102, A17 was 4.4 C at this step. Today's 4.3 C is 0.1 C lower, 2.3 percent lower.")
+    assert r["spoken_ok"] and r["numbers_ok"] and r["passed"]
+
+
+def test_a_number_the_backend_never_returned_fails():
+    r = score(COMPARE, CALLS, "A17 was 4.4 C in STAB-102. Today's 4.3 C is 0.2 C lower.")
+    assert r["numbers_ok"] is False and not r["passed"]
+
+
+def test_digits_inside_codes_are_not_numbers():
+    r = score(COMPARE, CALLS, "STAB-102 had A17 and CONTROL-01 at 4.4; today is 0.10 lower.")
+    assert r["numbers_ok"] is True
+
+
+def test_no_comparison_call_fails_numbers():
+    assert score(COMPARE, [], "It was 4.4, now 0.1 lower.")["numbers_ok"] is False
+
+
+def test_comparison_exactness_metric():
+    good = score(COMPARE, CALLS, "4.4 before; today 0.1 lower.")
+    bad = score(COMPARE, CALLS, "4.4 before; today 0.3 lower.")
+    metric = aggregate([(COMPARE, good, CALLS, ""), (COMPARE, bad, CALLS, "")], "m")["metrics"]["comparison_exactness"]
+    assert (metric["passed"], metric["total"]) == (1, 2)

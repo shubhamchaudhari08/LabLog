@@ -53,10 +53,41 @@ MEASUREMENT_TYPES: tuple[MeasurementType, ...] = (
 
 _BY_NAME = {t.name.casefold(): t for t in MEASUREMENT_TYPES}
 
+# Other names for a stored unit, per type. "Degrees" alone is Celsius for a
+# temperature (owner decision 2026-09-29): unmapped, it failed every C step with
+# UNIT_MISMATCH and the agent asked the same question forever
+# (.specify/bugs/voice-agent-stuck-actions). "degrees Fahrenheit" still means F.
+_ALIASES: dict[str, dict[str, str]] = {
+    "temperature": {"degree": "C", "degrees": "C", "deg": "C", "centigrade": "C"},
+}
+
 
 def lookup(name: str | None) -> MeasurementType | None:
     """The listed type with this name, ignoring case and padding; None if unlisted."""
     return _BY_NAME.get((name or "").strip().casefold())
+
+
+def canonical_unit(measurement_type: str | None, unit: str) -> str:
+    """The stored spelling of a unit said aloud: "Celsius", "degrees Celsius", "°C" → "C".
+
+    A rename, not a conversion: it only maps another name for the same unit. The
+    agent passes units as the user said them, because the voice agent drops a tool
+    call carrying words the user did not say (specs/007 R-716). Unknown units pass
+    through unchanged.
+    """
+    entry = lookup(measurement_type)
+    if not entry:
+        return unit
+    said = unit.strip().casefold().removeprefix("°").strip()
+    for prefix in ("degrees ", "degree "):
+        said = said.removeprefix(prefix)
+    alias = _ALIASES.get(entry.name, {}).get(said)
+    if alias:
+        return alias
+    for stored, spoken in zip(entry.units, entry.spoken_units + ("",) * len(entry.units)):
+        if said == stored.casefold() or (spoken and said in (spoken.casefold(), spoken.casefold().rstrip("s"))):
+            return stored
+    return unit
 
 
 def suggested_units(name: str | None) -> list[str]:

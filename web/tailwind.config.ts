@@ -1,95 +1,136 @@
 import type { Config } from 'tailwindcss';
 
 /**
- * Design tokens transcribed from DESIGN.md at the repository root.
+ * Design tokens, transcribed from DESIGN.md at the repository root: the
+ * v1 Warm Notebook system plus the extensions in its "Implementation
+ * decisions" section (specs/005-warm-notebook-redesign).
  *
- * The system is a warm cream canvas with coral accent and dark navy product
- * surfaces — deliberately warm where most instrument software is cool grey.
- * For LabLog the dark surfaces earn their place on the voice panel and the
- * transcript, which are the "product chrome" of this application.
+ * DESIGN.md is the one declaration. tests/design/tokens.parity.test.ts fails
+ * if a colour here differs from it, and tests/design/tokens.retired.test.ts
+ * fails if a class from the previous palette is used anywhere.
  *
- * Do not introduce colours outside this scale. If something needs a colour that
- * is not here, that is a design decision, not an implementation one.
+ * Do not add a colour here that DESIGN.md does not declare. Where a type
+ * token in DESIGN.md gives a range (38–40px), the upper bound is used.
  */
 const config: Config = {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}', './lib/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        // brand + accent
-        primary: '#cc785c',
-        'primary-active': '#a9583e',
-        'primary-disabled': '#e6dfd8',
-        'accent-teal': '#5db8a6',
-        'accent-amber': '#e8a55a',
-
-        // text
-        ink: '#141413',
-        body: '#3d3d3a',
-        'body-strong': '#252523',
-        muted: '#6c6a64',
-        'muted-soft': '#8e8b82',
+        'primary': '#b4553a',
+        'primary-active': '#963f28',
+        'primary-glow': '#e07b5a',
+        'primary-on-dark': '#e8876a',
+        'primary-text': '#a24c33',
+        'primary-text-active': '#7f3a26',
+        'primary-tint': '#f6e5dd',
+        'primary-tint-soft': '#fbeee8',
+        'primary-tint-faint': '#fdf3ee',
+        'primary-border-soft': '#e3b5a3',
         'on-primary': '#ffffff',
-        'on-dark': '#faf9f5',
-        'on-dark-soft': '#a09d96',
-
-        // surfaces
-        canvas: '#faf9f5',
-        'surface-soft': '#f5f0e8',
-        'surface-card': '#efe9de',
-        'surface-cream-strong': '#e8e0d2',
-        'surface-dark': '#181715',
-        'surface-dark-elevated': '#252320',
-        'surface-dark-soft': '#1f1e1b',
-
-        // hairlines — same tone family as surfaces, so borders read as one
-        // elevation step rather than as ink lines
-        hairline: '#e6dfd8',
-        'hairline-soft': '#ebe6df',
-
-        // semantic
-        success: '#5db872',
-        warning: '#d4a017',
-        error: '#c64545',
+        'canvas': '#f6f3ee',
+        'surface-card': '#fffdf9',
+        'surface-white': '#ffffff',
+        'surface-rail': '#fbf8f3',
+        'surface-chip': '#f8f4ee',
+        'surface-muted': '#f1ebe2',
+        'surface-muted-strong': '#efe9df',
+        'surface-segmented': '#ece5da',
+        'surface-note': '#efe8de',
+        'hairline': '#e6dfd4',
+        'hairline-soft': '#efe9df',
+        'border-control': '#e2d9cc',
+        'border-strong': '#ddd3c5',
+        'border-hover': '#c9b9a6',
+        'ink': '#1d1a16',
+        'body': '#5c564d',
+        'muted': '#6b655b',
+        'sidebar': '#171512',
+        'sidebar-hover': '#231f1b',
+        'sidebar-active': '#2b2622',
+        'sidebar-card': '#201d19',
+        'sidebar-border': '#2e2a25',
+        'sidebar-text': '#cfc8bc',
+        'sidebar-muted': '#9d968b',
+        'sidebar-label': '#8a8378',
+        'sidebar-icon-active': '#e48d6d',
+        'dark-surface': '#1a1714',
+        'dark-bench': '#13110e',
+        'dark-panel': '#1b1814',
+        'dark-raised': '#221e1a',
+        'dark-line': '#2c2823',
+        'dark-border': '#3a342c',
+        'dark-muted-fill': '#35302a',
+        'on-dark': '#f3eee6',
+        'on-dark-strong': '#ffffff',
+        'on-dark-body': '#cfc7bb',
+        'on-dark-muted': '#a39b8f',
+        'status-running-text': '#2d6e4c',
+        'status-running-bg': '#e3efe7',
+        'status-running-on-dark': '#7fd1a3',
+        'status-running-bg-dark': '#1f2d24',
+        'status-running-border-dark': '#2d4535',
+        'status-done-text': '#5c564d',
+        'status-done-bg': '#efe9df',
+        'status-done-dot': '#4f9483',
+        'deviation-text': '#9a5a14',
+        'deviation-on-dark': '#f0b36a',
+        'deviation-bg-dark': '#3a2a17',
+        'deviation-border-dark': '#5c4424',
+        'unit-on-dark': '#8fc9b8',
+        'avatar-bg': '#1f3a30',
+        'avatar-text': '#9fe0bf',
+        'danger-text': '#a3372a',
+        'danger-bg': '#f8e3de',
+        'danger-on-dark': '#f19a8c',
+        'danger-bg-dark': '#3a1f1a',
       },
 
       fontFamily: {
         // Loaded by next/font in app/layout.tsx. Naming a family Tailwind never
-        // loads is how the whole interface ended up rendering in Times.
-        display: ['var(--font-display)', 'Tiempos Headline', 'Garamond', 'serif'],
-        sans: ['var(--font-sans)', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
-        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        // loads is how the whole interface once ended up rendering in Times.
+        display: ['var(--font-display)', 'Georgia', 'serif'],
+        sans: ['var(--font-sans)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
       },
 
       fontSize: {
-        'display-xl': ['64px', { lineHeight: '1.05', letterSpacing: '-1.5px', fontWeight: '400' }],
-        'display-lg': ['48px', { lineHeight: '1.1', letterSpacing: '-1px', fontWeight: '400' }],
-        'display-md': ['36px', { lineHeight: '1.15', letterSpacing: '-0.5px', fontWeight: '400' }],
-        'display-sm': ['28px', { lineHeight: '1.2', letterSpacing: '-0.3px', fontWeight: '400' }],
-        'title-lg': ['22px', { lineHeight: '1.3', fontWeight: '500' }],
-        'title-md': ['18px', { lineHeight: '1.4', fontWeight: '500' }],
-        'title-sm': ['16px', { lineHeight: '1.4', fontWeight: '500' }],
-        'body-md': ['16px', { lineHeight: '1.55', fontWeight: '400' }],
-        'body-sm': ['14px', { lineHeight: '1.55', fontWeight: '400' }],
-        caption: ['13px', { lineHeight: '1.4', fontWeight: '500' }],
-        'caption-upper': ['12px', { lineHeight: '1.4', letterSpacing: '1.5px', fontWeight: '500' }],
-        code: ['14px', { lineHeight: '1.6', fontWeight: '400' }],
-      },
-
-      // Warm, tinted shadows — black at low opacity turns cream grey and muddy.
-      boxShadow: {
-        panel: '0 1px 2px rgba(20,20,19,0.04), 0 10px 28px -18px rgba(20,20,19,0.18)',
-        lift: '0 2px 4px rgba(20,20,19,0.05), 0 18px 40px -22px rgba(20,20,19,0.28)',
-        dark: '0 2px 6px rgba(0,0,0,0.30), 0 28px 60px -28px rgba(0,0,0,0.55)',
-        inset: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+        // Serif display: always weight 400 (DESIGN.md: "Don't bold the serif").
+        'display-xl': ['60px', { lineHeight: '1', letterSpacing: '-0.01em', fontWeight: '400' }],
+        'display-lg': ['56px', { lineHeight: '1', fontWeight: '400' }],
+        'display-bench': ['54px', { lineHeight: '1', fontWeight: '400' }],
+        'display-md': ['44px', { lineHeight: '1', fontWeight: '400' }],
+        'display-sm': ['40px', { lineHeight: '1.05', fontWeight: '400' }],
+        numeral: ['44px', { lineHeight: '1', fontWeight: '400' }],
+        'numeral-sm': ['30px', { lineHeight: '1', fontWeight: '400' }],
+        wordmark: ['27px', { lineHeight: '1', fontWeight: '400' }],
+        // Manrope
+        'title-lg': ['26px', { lineHeight: '1.25', fontWeight: '600' }],
+        'title-md': ['18px', { lineHeight: '1.3', fontWeight: '600' }],
+        'title-sm': ['15px', { lineHeight: '1.35', fontWeight: '600' }],
+        'body-lg': ['16px', { lineHeight: '1.5' }],
+        'body-md': ['15px', { lineHeight: '1.5' }],
+        caption: ['13px', { lineHeight: '1.4' }],
+        eyebrow: ['12px', { lineHeight: '1.3', letterSpacing: '0.12em', fontWeight: '600' }],
+        transcript: ['20px', { lineHeight: '1.35' }],
+        'transcript-bench': ['22px', { lineHeight: '1.35' }],
+        button: ['15px', { lineHeight: '1', fontWeight: '600' }],
+        nav: ['14.5px', { lineHeight: '1.3' }],
+        // JetBrains Mono
+        code: ['13px', { lineHeight: '1.4' }],
+        readout: ['30px', { lineHeight: '1.1' }],
       },
 
       borderRadius: {
-        xs: '4px',
-        sm: '6px',
-        md: '8px',
+        xs: '6px',
+        sm: '8px',
+        md: '10px',
         lg: '12px',
-        xl: '16px',
+        xl: '14px',
+        card: '16px',
+        panel: '18px',
+        hero: '20px',
+        feature: '22px',
         pill: '9999px',
       },
 
@@ -98,37 +139,68 @@ const config: Config = {
         xs: '8px',
         sm: '12px',
         md: '16px',
-        lg: '24px',
-        xl: '32px',
+        lg: '22px',
+        xl: '28px',
         xxl: '48px',
-        section: '96px',
+        'page-x': '48px',
+        'page-top': '36px',
+        // Bottom padding under the floating voice dock, so it never covers a
+        // primary action (DESIGN.md Do's and Don'ts).
+        dock: '140px',
+      },
+
+      // Warm-tinted shadows, verbatim from DESIGN.md. Never neutral grey.
+      boxShadow: {
+        'start-voice': '0 8px 20px -10px rgba(180,85,58,0.8)',
+        'tile-lift': '0 14px 28px -20px rgba(50,32,18,0.45)',
+        'dark-feature': '0 30px 60px -36px rgba(30,18,8,0.7)',
+        dock: '0 28px 60px -28px rgba(20,14,8,0.6)',
+        segment: '0 1px 3px rgba(40,30,20,0.12)',
+        // list-row-selected: the 3px clay inset marker on the left edge.
+        'selected-row': 'inset 3px 0 0 #b4553a',
+      },
+
+      backgroundImage: {
+        // hero-run-card.glow / bench mic: one corner, never a page wash.
+        'glow-clay': 'radial-gradient(circle, rgba(224,123,90,0.28), transparent 65%)',
+        // protocol-detail-card.headerFade
+        'protocol-fade': 'linear-gradient(180deg, #fbf5ef, #fffdf9)',
       },
 
       keyframes: {
-        // The hero moment: a measurement cell arriving the instant it is spoken.
-        // A coral wash that recedes rather than a flash that blinks — the value
-        // should feel placed, not alarmed.
-        'cell-land': {
-          '0%': { backgroundColor: 'rgba(204, 120, 92, 0.22)' },
-          '100%': { backgroundColor: 'transparent' },
+        // Voice rings (dock, bench): leave the orb and fade.
+        'ring-out': {
+          '0%': { transform: 'scale(0.62)', opacity: '0.55' },
+          '100%': { transform: 'scale(1.3)', opacity: '0' },
         },
-        'pulse-soft': {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0.45' },
+        // Waveform bars.
+        wave: {
+          '0%, 100%': { transform: 'scaleY(0.18)' },
+          '50%': { transform: 'scaleY(1)' },
         },
-        // Staggered entry: rows cascade rather than all appearing at once.
+        // Sidebar agent dot and live status dots.
+        'pulse-dot': {
+          '0%': { transform: 'scale(1)', opacity: '0.6' },
+          '100%': { transform: 'scale(2.4)', opacity: '0' },
+        },
+        // New card / chip.
         rise: {
-          from: { opacity: '0', transform: 'translateY(6px)' },
+          from: { opacity: '0', transform: 'translateY(8px)' },
           to: { opacity: '1', transform: 'none' },
         },
-        shimmer: {
-          '100%': { transform: 'translateX(100%)' },
+        caret: {
+          '0%, 49%': { opacity: '1' },
+          '50%, 100%': { opacity: '0' },
+        },
+        // A value arriving in the record: a clay-tint wash that recedes.
+        'cell-land': {
+          '0%': { backgroundColor: '#fbeee8' },
+          '100%': { backgroundColor: 'transparent' },
         },
         'fade-in': {
           from: { opacity: '0' },
           to: { opacity: '1' },
         },
-        // Sheets and docks arrive from the edge they belong to.
         'slide-up': {
           from: { opacity: '0', transform: 'translateY(12px) scale(0.985)' },
           to: { opacity: '1', transform: 'none' },
@@ -137,7 +209,6 @@ const config: Config = {
           from: { transform: 'translateX(-100%)' },
           to: { transform: 'none' },
         },
-        // A step becoming current: it settles into place rather than snapping.
         'step-in': {
           '0%': { opacity: '0.4', transform: 'translateX(-6px) scale(0.98)' },
           '60%': { opacity: '1', transform: 'translateX(2px) scale(1.005)' },
@@ -147,34 +218,19 @@ const config: Config = {
           from: { strokeDashoffset: '16' },
           to: { strokeDashoffset: '0' },
         },
-        // The current-step beacon: a ring that leaves the node and fades.
-        beacon: {
-          '0%': { transform: 'scale(1)', opacity: '0.55' },
-          '100%': { transform: 'scale(2.3)', opacity: '0' },
-        },
-        // Listening orb: slow breathing, never a blink.
-        breathe: {
-          '0%, 100%': { transform: 'scale(1)', opacity: '0.35' },
-          '50%': { transform: 'scale(1.18)', opacity: '0.08' },
-        },
-        bar: {
-          '0%, 100%': { transform: 'scaleY(0.35)' },
-          '50%': { transform: 'scaleY(1)' },
-        },
       },
       animation: {
+        'ring-out': 'ring-out 2.1s cubic-bezier(0.16, 1, 0.3, 1) infinite',
+        wave: 'wave 1.15s ease-in-out infinite',
+        'pulse-dot': 'pulse-dot 1.8s cubic-bezier(0.16, 1, 0.3, 1) infinite',
+        rise: 'rise 350ms cubic-bezier(0.16, 1, 0.3, 1) both',
+        caret: 'caret 1s steps(1) infinite',
         'cell-land': 'cell-land 1.2s ease-out forwards',
-        'pulse-soft': 'pulse-soft 1.6s ease-in-out infinite',
-        rise: 'rise 420ms cubic-bezier(0.16, 1, 0.3, 1) both',
-        shimmer: 'shimmer 1.6s infinite',
         'fade-in': 'fade-in 240ms ease-out both',
         'slide-up': 'slide-up 360ms cubic-bezier(0.16, 1, 0.3, 1) both',
         'slide-in-left': 'slide-in-left 320ms cubic-bezier(0.16, 1, 0.3, 1) both',
         'step-in': 'step-in 620ms cubic-bezier(0.16, 1, 0.3, 1) both',
         'check-draw': 'check-draw 420ms 120ms cubic-bezier(0.65, 0, 0.35, 1) both',
-        beacon: 'beacon 1.8s cubic-bezier(0.16, 1, 0.3, 1) infinite',
-        breathe: 'breathe 2.4s ease-in-out infinite',
-        bar: 'bar 1s ease-in-out infinite',
       },
 
       // One scale, so nothing reaches for 9999.

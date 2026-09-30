@@ -1,5 +1,3 @@
-"""Liveness endpoint. Also the target of the Gate 0 cross-origin check."""
-
 from fastapi import APIRouter
 
 router = APIRouter()

@@ -15,12 +15,14 @@ import { detailsToCsv, download, type Detail, type EvalRun, type HistoryEntry } 
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
 const title = (key: string) => key.replaceAll('_', ' ');
 
-// Trend series. Hues validated for CVD separation and 3:1 contrast on the canvas
-// (dataviz validate_palette: blue/coral, ΔE 21.7 protan). Identity is also carried
-// by the legend and direct labels, never by colour alone.
+// Trend series, in DESIGN.md tokens: status-done-dot (teal) for completion and
+// deviation-text (amber) for false records, keeping clay off status (D-16).
+// Measured 2026-09-28: 3.22:1 and 4.93:1 on the canvas; simulated ΔE76 44.7
+// (protan) and 48.8 (deutan) between them. Identity is also carried by the
+// legend and direct labels, never by colour alone.
 const SERIES = [
-  { key: 'task_completion_rate', label: 'Task completion', color: '#3b6fd4' },
-  { key: 'false_record_creation_rate', label: 'False-record rate', color: '#cc785c' },
+  { key: 'task_completion_rate', label: 'Task completion', color: '#4f9483' },
+  { key: 'false_record_creation_rate', label: 'False-record rate', color: '#9a5a14' },
 ] as const;
 
 function when(iso: string) {
@@ -30,7 +32,7 @@ function when(iso: string) {
 function RunBadge({ run }: { run: EvalRun }) {
   return (
     <div className="mt-sm flex flex-wrap items-center gap-xs text-caption">
-      <span className="badge badge-coral">Last run</span>
+      <span className="badge badge">Last run</span>
       <span className="font-mono text-body">{run.run_id ?? run.git_sha}</span>
       <span className="text-muted">
         · {run.scenario_count} scenarios · {run.model} · commit <span className="font-mono">{run.git_sha}</span> ·{' '}
@@ -48,23 +50,23 @@ function MetricList({ metrics }: { metrics: EvalRun['metrics'] }) {
         return (
           <div key={name} className="grid grid-cols-[1fr_auto] items-center gap-md px-lg py-sm">
             <div>
-              <p className="text-body-sm capitalize text-ink">
+              <p className="text-body-md capitalize text-ink">
                 {title(name)}
-                {m.lower_is_better && <span className="ml-xs text-caption normal-case text-muted-soft">target 0</span>}
+                {m.lower_is_better && <span className="ml-xs text-caption normal-case text-muted">target 0</span>}
               </p>
               {/* Rates where lower is better are not drawn as bars beside accuracies. */}
               {m.value !== null && !m.lower_is_better && (
-                <div className="mt-xs h-1.5 overflow-hidden rounded-pill bg-surface-card">
+                <div className="mt-xs h-1.5 overflow-hidden rounded-pill bg-surface-muted">
                   <div
-                    className={`h-full rounded-pill transition-[width] duration-700 ${good === false ? 'bg-error' : 'bg-primary'}`}
+                    className={`h-full rounded-pill transition-[width] duration-700 ${good === false ? 'bg-deviation-text' : 'bg-status-done-dot'}`}
                     style={{ width: pct(m.value) }}
                   />
                 </div>
               )}
             </div>
-            <p className={`tabular text-title-sm ${good === false ? 'text-error' : 'text-ink'}`}>
+            <p className={`tabular font-display text-numeral-sm ${good === false ? 'text-deviation-text' : 'text-ink'}`}>
               {m.value === null ? 'n/a' : pct(m.value)}
-              <span className="ml-xs text-caption text-muted-soft">
+              <span className="ml-xs font-sans text-caption text-muted">
                 {m.passed}/{m.total}
               </span>
             </p>
@@ -84,11 +86,11 @@ function CategoryBars({ byCategory }: { byCategory: NonNullable<EvalRun['by_cate
         {rows.map(([name, c]) => {
           const share = c.total ? c.passed / c.total : 0;
           return (
-            <li key={name} className="grid grid-cols-[140px_1fr_auto] items-center gap-md text-body-sm">
+            <li key={name} className="grid grid-cols-[140px_1fr_auto] items-center gap-md text-body-md">
               <span className="truncate capitalize text-body">{title(name)}</span>
-              <div className="h-2 overflow-hidden rounded-pill bg-surface-card" aria-hidden>
+              <div className="h-2 overflow-hidden rounded-pill bg-surface-muted" aria-hidden>
                 <div
-                  className={`h-full rounded-pill ${share < 1 ? 'bg-error' : 'bg-primary'}`}
+                  className={`h-full rounded-pill ${share < 1 ? 'bg-deviation-text' : 'bg-status-done-dot'}`}
                   style={{ width: `${share * 100}%` }}
                 />
               </div>
@@ -136,18 +138,18 @@ function Trend({ history }: { history: HistoryEntry[] }) {
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Task completion and false-record rate per eval run">
           {[0, 0.5, 1].map((g) => (
             <g key={g}>
-              <line x1={pad.l} x2={W - pad.r} y1={y(g)} y2={y(g)} stroke="#ebe6df" strokeWidth={1} />
-              <text x={pad.l - 8} y={y(g) + 4} textAnchor="end" className="fill-muted-soft text-[11px]">
+              <line x1={pad.l} x2={W - pad.r} y1={y(g)} y2={y(g)} stroke="#efe9df" strokeWidth={1} />
+              <text x={pad.l - 8} y={y(g) + 4} textAnchor="end" className="fill-muted text-[11px]">
                 {g * 100}%
               </text>
             </g>
           ))}
           {history.map((run, i) => (
-            <text key={run.run_id ?? i} x={x(i)} y={H - 8} textAnchor="middle" className="fill-muted-soft font-mono text-[10px]">
+            <text key={run.run_id ?? i} x={x(i)} y={H - 8} textAnchor="middle" className="fill-muted font-mono text-[10px]">
               {run.git_sha}
             </text>
           ))}
-          {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={pad.t} y2={pad.t + ih} stroke="#8e8b82" strokeWidth={1} strokeDasharray="3 3" />}
+          {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={pad.t} y2={pad.t + ih} stroke="#6b655b" strokeWidth={1} strokeDasharray="3 3" />}
 
           {SERIES.map((s) => {
             const points = history
@@ -164,7 +166,7 @@ function Trend({ history }: { history: HistoryEntry[] }) {
                   strokeLinejoin="round"
                 />
                 {points.map((p) => (
-                  <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={4} fill={s.color} stroke="#faf9f5" strokeWidth={2} />
+                  <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r={4} fill={s.color} stroke="#fffdf9" strokeWidth={2} />
                 ))}
                 {lastPoint && lastPoint.i === last && (
                   <text x={x(last) + 10} y={y(lastPoint.v) + 4} className="fill-body text-[11px]">
@@ -219,7 +221,7 @@ function Trend({ history }: { history: HistoryEntry[] }) {
       <details className="mt-sm text-caption">
         <summary className="cursor-pointer text-muted">Show runs as a table</summary>
         <table className="mt-xs w-full text-left">
-          <thead className="text-muted-soft">
+          <thead className="text-muted">
             <tr>
               <th className="py-xxs font-medium">Run</th>
               <th className="font-medium">Model</th>
@@ -268,11 +270,11 @@ function DrillDown({ details }: { details: Detail[] }) {
     <section className="mt-xl">
       <div className="flex flex-wrap items-center gap-md">
         <h2 className="font-sans text-title-lg">Scenarios</h2>
-        <div className="flex gap-xxs rounded-lg bg-surface-card p-xxs" role="tablist" aria-label="Filter by outcome">
+        <div className="flex gap-xxs rounded-lg bg-surface-muted p-xxs" role="tablist" aria-label="Filter by outcome">
           {TABS.map((t) => (
             <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`tab ${tab === t ? 'tab-active' : ''}`}>
               {t}
-              <span className="tabular ml-xs text-caption text-muted-soft">{count(t)}</span>
+              <span className="tabular ml-xs text-caption text-muted">{count(t)}</span>
             </button>
           ))}
         </div>
@@ -295,26 +297,26 @@ function DrillDown({ details }: { details: Detail[] }) {
                   type="button"
                   onClick={() => setOpen(open === d.scenario_id ? null : d.scenario_id)}
                   aria-expanded={open === d.scenario_id}
-                  className="grid w-full grid-cols-[auto_90px_1fr_auto] items-center gap-md px-lg py-sm text-left text-body-sm hover:bg-surface-soft"
+                  className="grid w-full grid-cols-[auto_90px_1fr_auto] items-center gap-md px-lg py-sm text-left text-body-md hover:bg-surface-rail"
                 >
-                  <span className={`badge ${d.passed ? '' : 'text-error'}`}>{d.passed ? 'Pass' : 'Fail'}</span>
+                  <span className={`badge ${d.passed ? '' : 'text-danger-text'}`}>{d.passed ? 'Pass' : 'Fail'}</span>
                   <span className="font-mono text-caption text-muted">{d.scenario_id}</span>
                   <span className="truncate text-ink">“{d.utterance}”</span>
-                  <span className="text-caption capitalize text-muted-soft">{title(d.category)}</span>
+                  <span className="text-caption capitalize text-muted">{title(d.category)}</span>
                 </button>
                 {open === d.scenario_id && (
-                  <div className="grid gap-sm bg-surface-soft px-lg py-sm text-caption md:grid-cols-2">
+                  <div className="grid gap-sm bg-surface-rail px-lg py-sm text-caption md:grid-cols-2">
                     <div>
-                      <p className="text-muted-soft">Expected</p>
+                      <p className="text-muted">Expected</p>
                       <pre className="mt-xxs whitespace-pre-wrap break-words font-mono text-body">{JSON.stringify(d.expected, null, 2)}</pre>
                     </div>
                     <div>
-                      <p className="text-muted-soft">What the agent did</p>
+                      <p className="text-muted">What the agent did</p>
                       {d.calls.length ? (
                         <ol className="mt-xxs space-y-xxs">
                           {d.calls.map((c, i) => (
                             <li key={i} className="font-mono text-body">
-                              <span className={c.success ? 'text-ink' : 'text-error'}>{c.tool}</span>{' '}
+                              <span className={c.success ? 'text-ink' : 'text-danger-text'}>{c.tool}</span>{' '}
                               {c.success ? '✓' : `✗ ${c.error ?? ''}`}
                               <span className="block break-words text-muted">{JSON.stringify(c.args)}</span>
                             </li>
@@ -323,7 +325,7 @@ function DrillDown({ details }: { details: Detail[] }) {
                       ) : (
                         <p className="mt-xxs text-body">No tool call.</p>
                       )}
-                      <p className="mt-xs text-muted-soft">Reply</p>
+                      <p className="mt-xs text-muted">Reply</p>
                       <p className="mt-xxs text-body">{d.reply || '—'}</p>
                     </div>
                   </div>
@@ -332,7 +334,7 @@ function DrillDown({ details }: { details: Detail[] }) {
             ))}
           </ul>
         ) : (
-          <p className="px-lg py-md text-body-sm text-muted">No scenarios match.</p>
+          <p className="px-lg py-md text-body-md text-muted">No scenarios match.</p>
         )}
       </div>
     </section>
@@ -346,7 +348,7 @@ function LegacyFailures({ failures }: { failures: EvalRun['failures'] }) {
       <h2 className="mt-xl font-sans text-title-lg">Failures ({failures.length})</h2>
       <ul className="mt-sm space-y-xs">
         {failures.map((f) => (
-          <li key={f.scenario_id} className="card px-lg py-sm text-body-sm">
+          <li key={f.scenario_id} className="card px-lg py-sm text-body-md">
             <span className="font-mono text-caption text-muted">{f.scenario_id}</span> “{f.utterance}”
             <p className="mt-xxs text-caption text-muted">
               {JSON.stringify(f.actual)} {f.note}
@@ -400,7 +402,7 @@ export default function Reliability() {
         <p className="mt-sm max-w-[52ch] text-body-md text-muted">
           No evaluation has been run yet, so there are no numbers to show. Running the harness writes them here.
         </p>
-        <p className="mt-md inline-block rounded-md border border-hairline bg-surface-soft px-sm py-xs font-mono text-body-sm text-body">
+        <p className="mt-md inline-block rounded-md border border-hairline bg-surface-rail px-sm py-xs font-mono text-body-md text-body">
           cd api && python -m eval.run
         </p>
       </main>

@@ -11,21 +11,21 @@
  * words being spoken and the values they produce are in one line of sight.
  */
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useQueryClient } from '@tanstack/react-query';
-import { useParams } from 'next/navigation';
+import { useEffect, useRef } from 'react';
+import { usePathname, useParams, useRouter, useSearchParams } from 'next/navigation';
 
 import { usePageCrumbs } from '@/components/shell/AppShell';
 import { useVoiceSession } from '@/components/voice/VoiceSession';
-import { VoiceDock } from '@/components/voice/VoiceDock';
 import { ProtocolSteps } from '@/components/protocol/ProtocolSteps';
+import { useStepTimers } from '@/components/timer/StepTimerProvider';
+import { StepTimerSlot } from '@/components/timer/TimerChip';
 import { SampleBoard } from '@/components/workspace/SampleBoard';
 import { Ledger, toEntries } from '@/components/workspace/Ledger';
 import { ExperimentTimeline } from '@/components/workspace/Timeline';
 import { StatusBadge } from '@/components/workspace/StatusBadge';
+import { StartBar } from '@/components/workspace/StartBar';
+import { ButtonLink } from '@/components/ui/Button';
 import { IconMic, IconProtocol } from '@/components/icons';
-import { startExperiment } from '@/lib/api';
 import {
   useDeviations,
   useEvents,
@@ -34,15 +34,19 @@ import {
   useObservations,
   useRealtimeExperiment,
   useSamples,
-  keys,
   type ProtocolStep,
 } from '@/lib/queries/useExperiment';
+import { runProgress } from '@/lib/ui/runProgress';
 
-function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+function Stat({ label, value, numeral = false }: { label: string; value: React.ReactNode; numeral?: boolean }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[12px] text-muted-soft">{label}</dt>
-      <dd className="tabular mt-[2px] truncate text-title-sm text-ink">{value}</dd>
+      <dt className="text-caption text-body">{label}</dt>
+      <dd
+        className={`tabular mt-[2px] truncate text-ink ${numeral ? 'font-display text-numeral-sm' : 'pt-[6px] text-title-sm'}`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
@@ -55,6 +59,7 @@ function ProtocolRail({
   samples,
   measurements,
   observations,
+  timerSlot,
 }: {
   protocol?: { name?: string; version?: string; protocol_code?: string };
   steps: ProtocolStep[];
@@ -63,9 +68,13 @@ function ProtocolRail({
   samples: Parameters<typeof ProtocolSteps>[0]['samples'];
   measurements: Parameters<typeof ProtocolSteps>[0]['measurements'];
   observations: Parameters<typeof ProtocolSteps>[0]['observations'];
+  timerSlot?: Parameters<typeof ProtocolSteps>[0]['timerSlot'];
 }) {
-  const done = completed ? steps.length : Math.min(currentIndex, steps.length);
-  const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
+  const progress = runProgress({
+    status: completed ? 'COMPLETED' : 'RUNNING',
+    current_step_index: currentIndex,
+    protocols: { steps },
+  });
 
   return (
     <section aria-labelledby="protocol-heading" className="flex h-full flex-col">
@@ -73,29 +82,31 @@ function ProtocolRail({
         <p className="eyebrow flex items-center gap-xs">
           <IconProtocol className="h-4 w-4 text-primary" />
           Protocol in use
-          {protocol?.protocol_code && (
-            <span className="font-mono text-muted">{protocol.protocol_code}</span>
-          )}
+          {protocol?.protocol_code && <span className="font-mono normal-case tracking-normal">{protocol.protocol_code}</span>}
         </p>
-        <h2 id="protocol-heading" className="mt-xs text-[26px] leading-tight">
+        <h2 id="protocol-heading" className="mt-xs line-clamp-2 text-display-sm leading-tight" title={protocol?.name}>
           {protocol?.name ?? 'No protocol'}
           {protocol?.version && (
-            <span className="ml-xs align-middle font-sans text-caption text-muted-soft">
-              {protocol.version}
-            </span>
+            <span className="ml-xs align-middle font-sans text-caption text-muted">{protocol.version}</span>
           )}
         </h2>
-        <div className="mt-md flex items-center gap-sm">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-pill bg-surface-card">
-            <div
-              className="h-full rounded-pill bg-gradient-to-r from-accent-teal to-primary transition-[width] duration-700 ease-out"
-              style={{ width: `${pct}%` }}
-            />
+        {progress.segments.length > 0 && (
+          <div className="mt-md flex items-center gap-sm">
+            <div className="flex flex-1 gap-[4px]">
+              {progress.segments.map((segment, i) => (
+                <span
+                  key={i}
+                  className={`h-[5px] flex-1 rounded-pill ${
+                    segment === 'done' ? 'bg-status-done-dot' : segment === 'current' ? 'bg-primary' : 'bg-surface-muted-strong'
+                  }`}
+                />
+              ))}
+            </div>
+            <span className="tabular whitespace-nowrap text-caption text-body">
+              {completed ? 'Complete' : progress.currentLabel.replace(' steps', '')}
+            </span>
           </div>
-          <span className="tabular text-caption text-muted">
-            {completed ? 'Complete' : `Step ${Math.min(currentIndex + 1, steps.length)} of ${steps.length}`}
-          </span>
-        </div>
+        )}
       </header>
       <div className="flex-1 overflow-y-auto px-md py-sm">
         <ProtocolSteps
@@ -105,71 +116,10 @@ function ProtocolRail({
           samples={samples}
           measurements={measurements}
           observations={observations}
+          timerSlot={timerSlot}
         />
       </div>
     </section>
-  );
-}
-
-/**
- * Voice records only into a RUNNING experiment (the dispatcher refuses the rest).
- * A READY run gets its Start here; anything else gets one line saying why the
- * microphone would have nothing to write to (specs/003-post-mvp-features FR-214).
- */
-function StartBar({ experimentId, status, hasProtocol }: { experimentId: string; status: string; hasProtocol: boolean }) {
-  const client = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  if (status === 'RUNNING') return null;
-
-  async function start() {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await startExperiment(experimentId);
-      if (!result.success) setError(result.message);
-      await Promise.all([
-        client.invalidateQueries({ queryKey: keys.experiment(experimentId) }),
-        client.invalidateQueries({ queryKey: ['experiments'] }),
-        client.invalidateQueries({ queryKey: keys.events(experimentId) }),
-      ]);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The experiment was not started.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const message =
-    status === 'READY'
-      ? 'Ready to run. Start it, then press the microphone to record by voice.'
-      : status === 'DRAFT'
-        ? hasProtocol
-          ? 'This experiment is a draft.'
-          : 'No protocol yet. Press the microphone and say "create a new protocol and start this experiment", then dictate the steps.'
-        : 'This run is finished, so voice has nothing to record into.';
-
-  return (
-    <div className="mt-md flex flex-wrap items-center gap-sm rounded-lg border border-hairline bg-surface-soft px-md py-sm text-body-sm">
-      <IconMic className="h-4 w-4 shrink-0 text-primary" />
-      <span className="min-w-0 flex-1 text-body">{message}</span>
-      {status === 'READY' && (
-        <button type="button" className="btn-primary" onClick={start} disabled={busy}>
-          {busy ? 'Starting…' : 'Start experiment'}
-        </button>
-      )}
-      {(status === 'COMPLETED' || status === 'CANCELLED') && (
-        <Link href="/experiments/new" className="btn-secondary">
-          New experiment
-        </Link>
-      )}
-      {error && (
-        <p role="alert" className="w-full text-caption text-error">
-          {error}
-        </p>
-      )}
-    </div>
   );
 }
 
@@ -177,6 +127,7 @@ export default function ExperimentWorkspace() {
   const params = useParams<{ id: string }>();
   const experimentId = params.id;
   const voice = useVoiceSession();
+  const timers = useStepTimers();
 
   useRealtimeExperiment(experimentId);
 
@@ -196,6 +147,20 @@ export default function ExperimentWorkspace() {
     if (code && loadedStatus && !closed) bind({ id: experimentId, code });
     return () => unbind(experimentId);
   }, [bind, unbind, experimentId, code, loadedStatus, closed]);
+
+  // "Ask about this run by voice" (Experiments drawer) arrives with ?voice=1.
+  // Start once this run is bound, so the session is its session (specs/005 U1).
+  const router = useRouter();
+  const pathname = usePathname();
+  const askedForVoice = useSearchParams().get('voice') === '1';
+  const voiceStarted = useRef(false);
+  useEffect(() => {
+    if (!askedForVoice || voiceStarted.current || closed) return;
+    if (voice.bound?.id !== experimentId || voice.live) return;
+    voiceStarted.current = true;
+    voice.startVoice();
+    router.replace(pathname, { scroll: false });
+  }, [askedForVoice, closed, voice, experimentId, router, pathname]);
 
   usePageCrumbs([
     { label: 'Experiments', href: '/experiments' },
@@ -245,6 +210,13 @@ export default function ExperimentWorkspace() {
       samples={samples.data ?? []}
       measurements={measurements.data ?? []}
       observations={observations.data ?? []}
+      timerSlot={
+        // Timers exist only on a RUNNING run, and only for the experiment the
+        // timer provider is watching (a live session bound elsewhere keeps its own).
+        status === 'RUNNING' && timers.watched?.id === experimentId
+          ? (index) => <StepTimerSlot stepIndex={index} currentIndex={currentIndex} />
+          : undefined
+      }
     />
   );
 
@@ -260,27 +232,35 @@ export default function ExperimentWorkspace() {
   }
 
   return (
-    <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_400px]">
-      <main id="main" className="min-w-0 px-md pb-lg pt-lg sm:px-lg lg:px-xl lg:pt-xl">
-        {/* header */}
-        <header className="bloom -mx-md -mt-lg px-md pb-lg pt-lg sm:-mx-lg sm:px-lg lg:-mx-xl lg:-mt-xl lg:px-xl lg:pt-xl">
+    <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_380px]">
+      <main id="main" className="min-w-0 px-md pb-dock pt-lg sm:px-xl lg:px-page-x lg:pt-page-top">
+        <header>
           <div className="flex flex-wrap items-center gap-sm">
-            <StatusBadge status={status} />
+            <StatusBadge status={status} live />
             <span className="font-mono text-caption text-muted">{code}</span>
+            {status === 'RUNNING' && (
+              <ButtonLink href={`/dashboard/experiments/${experimentId}/bench`} className="ml-auto">
+                <IconMic className="h-[18px] w-[18px]" />
+                Open bench mode
+              </ButtonLink>
+            )}
           </div>
           {experiment.isLoading ? (
             <div className="skeleton mt-sm h-12 w-2/3" />
           ) : (
-            <h1 className="page-title mt-sm max-w-[22ch] animate-rise">{experiment.data?.name}</h1>
+            <h1 className="page-title mt-sm line-clamp-2 max-w-[22ch] animate-rise" title={experiment.data?.name}>
+              {experiment.data?.name}
+            </h1>
           )}
           <dl className="mt-lg grid max-w-[720px] grid-cols-2 gap-md sm:grid-cols-4">
             <Stat label="Started" value={started} />
-            <Stat label="Samples" value={samples.data?.length ?? '—'} />
-            <Stat label="Readings" value={measurements.data?.length ?? '—'} />
+            <Stat label="Samples" value={samples.data?.length ?? '—'} numeral />
+            <Stat label="Readings" value={measurements.data?.length ?? '—'} numeral />
             <Stat
               label="Deviations"
+              numeral
               value={
-                <span className={deviations.data?.length ? 'text-warning' : undefined}>
+                <span className={deviations.data?.length ? 'text-deviation-text' : undefined}>
                   {deviations.data?.length ?? '—'}
                 </span>
               }
@@ -292,14 +272,14 @@ export default function ExperimentWorkspace() {
         </header>
 
         {/* below xl the protocol rail joins the flow, just under the header */}
-        <div className="card mt-lg overflow-hidden xl:hidden">{rail}</div>
+        <div className="mt-lg overflow-hidden rounded-card border border-hairline bg-surface-rail xl:hidden">{rail}</div>
 
         <section className="mt-xl" aria-labelledby="samples-heading">
           <div className="flex items-baseline justify-between border-b border-hairline pb-xs">
-            <h2 id="samples-heading" className="panel-label">
+            <h2 id="samples-heading" className="eyebrow">
               Samples
             </h2>
-            <span className="text-caption text-muted-soft">latest reading per sample</span>
+            <span className="text-caption text-muted">latest reading per sample</span>
           </div>
           <div className="pt-md">
             <SampleBoard
@@ -316,13 +296,12 @@ export default function ExperimentWorkspace() {
           <ExperimentTimeline events={events.data ?? []} />
         </div>
 
-        <VoiceDock experimentId={experimentId} experimentCode={code ?? '—'} closed={closed} />
       </main>
 
       {/* the rail: sticky under the header, scrolls on its own */}
       <aside
         aria-label="Protocol"
-        className="sticky top-16 hidden h-[calc(100dvh-4rem)] border-l border-hairline bg-surface-soft/60 [--rail-bg:#f7f3ec] xl:block"
+        className="sticky top-[68px] hidden h-[calc(100dvh-68px)] border-l border-hairline bg-surface-rail xl:block"
       >
         {rail}
       </aside>

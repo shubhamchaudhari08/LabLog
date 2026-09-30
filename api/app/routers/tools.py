@@ -11,10 +11,11 @@ from a language model.
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from ..db import load_experiment
 from ..deps import User, get_current_user, supabase_admin
@@ -33,6 +34,13 @@ class ToolCall(BaseModel):
     # require it (contracts/tools-api-v2.md).
     experiment_id: str | None = None
     session_id: str | None = None
+    # The browser's IANA zone (specs/006 contract §1). It only groups dates in
+    # search; it never stamps a row, and it is not in args, so the model cannot set it.
+    tz: str | None = None
+    # The user's last committed transcript, stored as a reading's raw_spoken_value.
+    # Outside args for the same reason as tz: the model cannot set it, so it can
+    # never be a value the user did not say (voice-agent-stuck-actions).
+    utterance: str | None = Field(None, max_length=2000)
 
 
 def _fail(error: str, message: str, **detail: Any) -> dict[str, Any]:
@@ -69,7 +77,7 @@ async def call_tool(body: ToolCall, user: User = Depends(get_current_user)) -> d
         return _fail(
             "INVALID_ARGS",
             "The tool call was missing or misusing a required field.",
-            errors=exc.errors(include_url=False),
+            errors=exc.errors(include_url=False, include_context=False),
         )
 
     sb = supabase_admin()
@@ -119,10 +127,13 @@ async def call_tool(body: ToolCall, user: User = Depends(get_current_user)) -> d
     #    ponytail: two PostgREST calls, not one transaction — a crash between them
     #    leaves a row without its event (the quickstart §1.4 query catches it).
     #    Move writes into a Postgres function called via .rpc() if that matters.
+    accepts = inspect.signature(handler).parameters
+    extra = {name: getattr(body, name) for name in ("tz", "utterance") if name in accepts}
     return handler(
         sb=sb,
         experiment=experiment,
         user_id=user.id,
         args=args,
         session_id=body.session_id,
+        **extra,
     )

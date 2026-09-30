@@ -64,6 +64,14 @@ def test_spoken_protocol_name_resolves_by_its_words(client, sb):  # noqa: F811
     assert data["protocol"]["protocol_code"] == "STAB"
 
 
+@pytest.mark.parametrize("said", ["Sample Stability Evaluation protocol", "the sample stability protocol"])
+def test_filler_words_around_a_spoken_protocol_name_are_ignored(client, sb, said):  # noqa: F811
+    # The agent passes the protocol as said (specs/007 R-716), so "protocol" and
+    # "the" come along; live probe C1 hit PROTOCOL_NOT_FOUND on exactly this.
+    data = call(client, "create_experiment", {**CREATE, "protocol_ref": said, "confirmed": True}).json()["data"]
+    assert data["protocol"]["protocol_code"] == "STAB"
+
+
 def test_start_false_leaves_it_ready(client, sb):  # noqa: F811
     data = call(client, "create_experiment", {**CREATE, "start": False, "confirmed": True}).json()["data"]
     assert data["status"] == "READY"
@@ -180,7 +188,7 @@ def test_desk_bootstrap_without_an_experiment(client, sb, minted):  # noqa: F811
     body = boot(client).json()
     assert body["profile"] == "desk" and body["experiment"] is None
     config = body["session_config"]
-    assert [t["name"] for t in config["tools"]] == ["list_protocols", "create_experiment", "start_experiment"]
+    assert [t["name"] for t in config["tools"]] == ["list_protocols", "search_experiments", "create_experiment", "start_experiment"]
     assert "No experiment is open" in config["greeting"]
     assert "STAB: Sample Stability Evaluation" in config["system_prompt"]
     assert "STAB-104" in config["system_prompt"]  # a running run the user can resume
@@ -199,3 +207,31 @@ def test_finished_experiment_refuses_a_session_before_minting(client, sb, minted
     res = boot(client, f"?experiment_id={EXPERIMENT_ID}")
     assert res.status_code == 409 and res.json()["detail"] == "EXPERIMENT_CLOSED"
     assert minted == []
+
+
+# -- specs/006: search through POST /tools, and the tz envelope ---------------
+
+
+def test_search_runs_with_no_experiment_open(client, sb):  # noqa: F811
+    before = counts(sb)
+    res = call(client, "search_experiments", {"status": "RUNNING"}).json()
+    assert res["success"] is True
+    assert [r["experiment_code"] for r in res["data"]["results"]] == ["STAB-104"]
+    assert counts(sb) == before
+
+
+def test_envelope_tz_reaches_search(client, sb):  # noqa: F811
+    body = {"tool": "search_experiments", "args": {"period": "today"}, "tz": "Asia/Kolkata", "session_id": "s"}
+    res = client.post("/tools", json=body, headers={"Authorization": f"Bearer {make_token(OWNER_ID)}"}).json()
+    assert res["data"]["resolved"]["tz_used"] == "Asia/Kolkata"
+
+
+def test_the_model_cannot_set_the_zone(client, sb):  # noqa: F811
+    res = call(client, "search_experiments", {"tz": "UTC"}).json()
+    assert res["success"] is False and res["error"] == "INVALID_ARGS"
+
+
+def test_bench_tools_ignore_an_envelope_tz(client, sb):  # noqa: F811
+    body = {"tool": "get_active_experiment", "args": {}, "experiment_id": EXPERIMENT_ID, "tz": "Asia/Kolkata"}
+    res = client.post("/tools", json=body, headers={"Authorization": f"Bearer {make_token(OWNER_ID)}"}).json()
+    assert res["success"] is True

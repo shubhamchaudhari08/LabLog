@@ -44,7 +44,13 @@ export interface SessionEnd {
   type: 'session.end';
 }
 
-export type ClientMessage = SessionUpdate | InputAudio | ToolResult | SessionResume | SessionEnd;
+/** Ask the agent to reply now (specs/004: timer announcements). `instructions` is one-shot. */
+export interface ReplyCreate {
+  type: 'reply.create';
+  instructions?: string;
+}
+
+export type ClientMessage = SessionUpdate | InputAudio | ToolResult | SessionResume | SessionEnd | ReplyCreate;
 
 // ---------------------------------------------------------------------------
 // Server -> client

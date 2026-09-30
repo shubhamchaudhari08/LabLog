@@ -56,6 +56,17 @@ def test_keyterms_include_types_and_spoken_units():
             assert spoken in terms
 
 
+def test_bare_degrees_is_celsius_for_temperature_only():
+    # voice-agent-stuck-actions: "4.2 degrees" was stored as the unit "degrees",
+    # so a C step answered UNIT_MISMATCH on every retry.
+    for said in ("degrees", "Degree", "deg", "centigrade", "degrees centigrade", "°C", "degrees Celsius"):
+        assert vocabulary.canonical_unit("temperature", said) == "C", said
+    assert vocabulary.canonical_unit("temperature", "degrees Fahrenheit") == "F"
+    # Other types are untouched: no rename leaks outside temperature.
+    assert vocabulary.canonical_unit("mass", "degrees") == "degrees"
+    assert vocabulary.canonical_unit("osmolality", "degrees") == "degrees"
+
+
 def test_unit_prompt_suggests_units_for_types_that_had_none(sb, experiment):
     # rpm was in the keyterms but missing from the old suggestion table.
     result = record_measurement(

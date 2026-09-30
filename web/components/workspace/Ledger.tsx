@@ -28,8 +28,8 @@ export interface Entry {
 
 const KIND_MARK: Record<Entry['kind'], string> = {
   measurement: 'bg-primary',
-  observation: 'bg-accent-teal',
-  deviation: 'bg-accent-amber',
+  observation: 'bg-status-done-dot',
+  deviation: 'bg-deviation-text',
 };
 
 function time(iso: string) {
@@ -78,10 +78,10 @@ export function Ledger({ entries, loading }: { entries: Entry[]; loading?: boole
   return (
     <section aria-labelledby="ledger-heading">
       <header className="flex items-baseline justify-between border-b border-hairline pb-xs">
-        <h2 id="ledger-heading" className="panel-label">
+        <h2 id="ledger-heading" className="eyebrow">
           Record
         </h2>
-        <span className="tabular text-caption text-muted-soft">
+        <span className="tabular text-caption text-muted">
           {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
         </span>
       </header>
@@ -98,7 +98,7 @@ export function Ledger({ entries, loading }: { entries: Entry[]; loading?: boole
       ) : entries.length === 0 ? (
         <div className="py-xl">
           <p className="text-body-md text-muted">Nothing recorded yet.</p>
-          <p className="mt-xs inline-flex items-center gap-xs rounded-md border border-dashed border-hairline bg-surface-soft px-sm py-xs font-mono text-body-sm text-body">
+          <p className="mt-xs inline-flex items-center gap-xs rounded-md border border-dashed border-hairline bg-surface-rail px-sm py-xs font-mono text-body-md text-body">
             <span aria-hidden className="text-primary">
               ▸
             </span>
@@ -114,7 +114,7 @@ export function Ledger({ entries, loading }: { entries: Entry[]; loading?: boole
             >
               <time
                 dateTime={entry.at}
-                className="tabular w-[72px] shrink-0 whitespace-nowrap font-mono text-caption text-muted-soft"
+                className="tabular w-[72px] shrink-0 whitespace-nowrap font-mono text-caption text-muted"
               >
                 {time(entry.at)}
               </time>
@@ -125,26 +125,26 @@ export function Ledger({ entries, loading }: { entries: Entry[]; loading?: boole
               />
 
               {entry.sample && (
-                <span className="w-24 shrink-0 whitespace-nowrap font-mono text-body-sm text-ink">
+                <span className="w-24 shrink-0 whitespace-nowrap font-mono text-body-md text-ink">
                   {entry.sample}
                 </span>
               )}
 
               <span
-                className={`min-w-0 flex-1 text-body-sm ${
+                className={`min-w-0 flex-1 text-body-md ${
                   entry.kind === 'measurement' ? 'capitalize text-muted' : 'text-body'
                 }`}
               >
                 {entry.text}
                 {entry.note && (
-                  <span className="ml-xs text-caption text-muted-soft">· {entry.note}</span>
+                  <span className="ml-xs text-caption text-muted">· {entry.note}</span>
                 )}
               </span>
 
               {entry.value !== undefined && (
                 <span className="tabular shrink-0 text-title-sm text-ink">
                   {entry.value}
-                  <span className="ml-xxs text-body-sm text-muted-soft">{entry.unit}</span>
+                  <span className="ml-xxs text-body-md text-muted">{entry.unit}</span>
                 </span>
               )}
             </li>

@@ -37,20 +37,19 @@ export default function LoginPage() {
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-      <aside className="relative hidden overflow-hidden bg-surface-dark p-xxl text-on-dark lg:flex lg:flex-col">
-        <span aria-hidden className="absolute -left-32 top-1/3 h-96 w-96 rounded-pill bg-primary/20 blur-3xl" />
-        <span aria-hidden className="absolute -bottom-24 right-0 h-72 w-72 rounded-pill bg-accent-teal/10 blur-3xl" />
+      <aside className="relative hidden overflow-hidden bg-dark-surface p-xxl text-on-dark lg:flex lg:flex-col">
+        <span aria-hidden className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-glow-clay" />
 
         <div className="relative flex items-center gap-sm">
-          <span className="grid h-9 w-9 place-items-center rounded-md bg-primary/15 text-primary ring-1 ring-inset ring-primary/25">
-            <Logo className="h-5 w-5" />
+          <span className="grid h-[38px] w-[38px] place-items-center rounded-md border border-sidebar-border bg-sidebar-card text-sidebar-icon-active">
+            <Logo className="h-[22px] w-[22px]" />
           </span>
-          <span className="font-display text-[24px]">LabLog</span>
+          <span className="font-display text-wordmark">LabLog</span>
         </div>
 
         <div className="relative my-auto max-w-[460px]">
           <h1 className="text-display-lg text-on-dark">Say it once. It&rsquo;s in the record.</h1>
-          <p className="mt-md text-body-md text-on-dark-soft">
+          <p className="mt-md text-body-md text-on-dark-muted">
             Speak readings at the bench. Each one is validated, stored against the right sample and
             protocol step, and read back to you.
           </p>
@@ -60,45 +59,45 @@ export default function LoginPage() {
               <span className="grid h-8 w-8 place-items-center rounded-pill bg-primary text-on-primary">
                 <IconMic className="h-4 w-4" />
               </span>
-              <span className="font-mono text-body-sm">“A17 is 4.2 Celsius”</span>
+              <span className="font-mono text-body-md">“A17 is 4.2 Celsius”</span>
               <span className="ml-auto flex h-4 items-center gap-[3px]" aria-hidden>
                 {[0, 1, 2, 3].map((i) => (
                   <span
                     key={i}
-                    className="h-full w-[3px] animate-bar rounded-pill bg-primary"
-                    style={{ animationDelay: `${i * 120}ms` }}
+                    className="h-full w-[3px] rounded-pill bg-primary-glow"
+                    style={{ transform: `scaleY(${[0.5, 0.9, 0.65, 0.35][i]})` }}
                   />
                 ))}
               </span>
             </div>
-            <div className="ml-xl flex animate-slide-up items-center gap-sm rounded-lg border border-accent-teal/20 bg-accent-teal/[0.07] px-md py-sm [animation-delay:700ms]">
-              <IconCheck className="h-4 w-4 text-accent-teal" />
-              <span className="font-mono text-body-sm text-on-dark">A17</span>
-              <span className="text-body-sm text-on-dark-soft">temperature</span>
+            <div className="ml-xl flex animate-slide-up items-center gap-sm rounded-lg border border-status-running-border-dark bg-status-running-bg-dark px-md py-sm [animation-delay:700ms]">
+              <IconCheck className="h-4 w-4 text-status-running-on-dark" />
+              <span className="font-mono text-body-md text-on-dark">A17</span>
+              <span className="text-body-md text-on-dark-muted">temperature</span>
               <span className="tabular ml-auto font-display text-[24px] leading-none">
-                4.2 <span className="font-sans text-caption text-on-dark-soft">C</span>
+                4.2 <span className="font-sans text-caption text-on-dark-muted">C</span>
               </span>
             </div>
           </div>
         </div>
 
-        <p className="relative text-caption text-on-dark-soft/70">
+        <p className="relative text-caption text-on-dark-muted/70">
           Every change is audited. Corrections supersede; nothing is overwritten.
         </p>
       </aside>
 
       <main id="main" className="flex flex-col justify-center px-lg py-xxl">
         <div className="mx-auto w-full max-w-[380px] animate-rise">
-          <span className="grid h-10 w-10 place-items-center rounded-md bg-surface-dark text-primary lg:hidden">
+          <span className="grid h-10 w-10 place-items-center rounded-md bg-sidebar text-sidebar-icon-active lg:hidden">
             <Logo className="h-6 w-6" />
           </span>
           <h2 className="mt-md text-display-md lg:mt-0">Sign in</h2>
           <p className="mt-xs text-body-md text-muted">We&rsquo;ll email you a one-time sign-in link.</p>
 
           {sent ? (
-            <div className="mt-xl animate-slide-up rounded-lg border border-accent-teal/30 bg-accent-teal/[0.06] px-lg py-md">
-              <p className="text-body-sm font-medium text-ink">Check your inbox</p>
-              <p className="mt-xxs text-body-sm text-muted">
+            <div className="mt-xl animate-slide-up rounded-lg border border-status-done-dot/30 bg-status-done-dot/[0.06] px-lg py-md">
+              <p className="text-body-md font-medium text-ink">Check your inbox</p>
+              <p className="mt-xxs text-body-md text-muted">
                 A sign-in link is on its way to <span className="text-ink">{email}</span>.
               </p>
             </div>
@@ -122,7 +121,7 @@ export default function LoginPage() {
                 {busy ? 'Sending…' : 'Send sign-in link'}
               </button>
               {error && (
-                <p className="text-caption text-error" role="alert">
+                <p className="text-caption text-danger-text" role="alert">
                   {error}
                 </p>
               )}
@@ -132,7 +131,7 @@ export default function LoginPage() {
           {/* Guest mode is the default route; this form exists for real accounts. */}
           {!sent && (
             <>
-              <div className="my-lg flex items-center gap-sm text-caption text-muted-soft">
+              <div className="my-lg flex items-center gap-sm text-caption text-muted">
                 <span className="h-px flex-1 bg-hairline" />
                 or
                 <span className="h-px flex-1 bg-hairline" />

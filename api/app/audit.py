@@ -27,6 +27,14 @@ EventType = Literal[
     "PROTOCOL_ASSOCIATED",
     "EXPERIMENT_STARTED",
     "SAMPLE_CREATED",
+    # specs/004-step-timers data-model §1. There is no TIMER_COMPLETED: completion
+    # is derived from the stored end time, never written.
+    "TIMER_STARTED",
+    "TIMER_CANCELLED",
+    # specs/007-step-scoped-completeness data-model §5. A timed step's start is
+    # an event; its completion is PROTOCOL_STEP_COMPLETED with timing fields.
+    "PROTOCOL_STEP_STARTED",
+    "DEVIATIONS_REVIEWED",
 ]
 
 

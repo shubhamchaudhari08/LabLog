@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MeasurementRow, ProtocolStep } from '@/lib/queries/useExperiment';
 import { IconCheck, IconChevron, IconMic } from '@/components/icons';
+import { expectationFor, requirementLines, unitForReading } from '@/lib/stepRequirements';
 
 export interface StepSample {
   id: string;
@@ -35,7 +36,12 @@ export function readingsRequired(step: ProtocolStep): string[] {
 }
 
 function unitFor(step: ProtocolStep, type: string): string | undefined {
-  return step.default_unit?.[type];
+  return unitForReading(step, type);
+}
+
+/** "C · 2 to 8": the unit and what the value should be, as far as the step says. */
+function readingDetail(step: ProtocolStep, type: string): string | null {
+  return [unitFor(step, type), expectationFor(step, type)].filter(Boolean).join(' · ') || null;
 }
 
 function sayHint(step: ProtocolStep, samples: StepSample[]): string {
@@ -53,7 +59,7 @@ type StepState = 'done' | 'current' | 'upcoming' | 'reference';
 function Node({ state, index }: { state: StepState; index: number }) {
   if (state === 'done') {
     return (
-      <span className="relative z-[1] grid h-7 w-7 place-items-center rounded-pill bg-accent-teal text-on-primary shadow-[0_0_0_4px_var(--rail-bg)] transition-colors duration-500">
+      <span className="relative z-[1] grid h-7 w-7 place-items-center rounded-pill border border-status-running-text/25 bg-status-running-bg text-status-running-text shadow-[0_0_0_4px_var(--rail-bg)] transition-colors duration-500">
         <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
           <path
             d="M4.5 10.5l3.5 3.5 7.5-8"
@@ -72,7 +78,7 @@ function Node({ state, index }: { state: StepState; index: number }) {
   if (state === 'current') {
     return (
       <span className="relative z-[1] grid h-7 w-7 place-items-center shadow-[0_0_0_4px_var(--rail-bg)] rounded-pill">
-        <span aria-hidden className="absolute inset-0 animate-beacon rounded-pill bg-primary" />
+        <span aria-hidden className="absolute inset-0 animate-pulse-dot rounded-pill bg-primary" />
         <span className="relative grid h-7 w-7 place-items-center rounded-pill bg-primary text-[12px] font-semibold text-on-primary">
           {index + 1}
         </span>
@@ -82,7 +88,7 @@ function Node({ state, index }: { state: StepState; index: number }) {
   return (
     <span
       className={`relative z-[1] grid h-7 w-7 place-items-center rounded-pill border-[1.5px] bg-[var(--rail-bg)] text-[12px] font-medium shadow-[0_0_0_4px_var(--rail-bg)] ${
-        state === 'reference' ? 'border-muted-soft/60 text-body' : 'border-hairline text-muted-soft'
+        state === 'reference' ? 'border-border-hover text-body' : 'border-border-strong text-muted'
       }`}
     >
       {index + 1}
@@ -106,13 +112,13 @@ function Coverage({
     <div className="mt-sm overflow-hidden rounded-md border border-hairline-soft bg-canvas">
       <table className="w-full text-left text-[13px]">
         <thead>
-          <tr className="border-b border-hairline-soft bg-surface-soft/70 text-[11px] font-medium tracking-[0.6px] text-muted-soft">
+          <tr className="border-b border-hairline-soft bg-surface-rail/70 text-[11px] font-medium tracking-[0.6px] text-muted">
             <th className="px-sm py-[6px] font-medium">Sample</th>
             {types.map((type) => (
               <th key={type} className="px-sm py-[6px] font-medium capitalize">
                 {type}
-                {unitFor(step, type) && (
-                  <span className="ml-xxs normal-case text-muted-soft/80">({unitFor(step, type)})</span>
+                {readingDetail(step, type) && (
+                  <span className="ml-xxs normal-case text-muted/80">({readingDetail(step, type)})</span>
                 )}
               </th>
             ))}
@@ -136,13 +142,13 @@ function Coverage({
                         key={`${reading.id}-${reading.value}`}
                         className="tabular inline-flex animate-cell-land items-center gap-xxs rounded-xs px-xxs text-ink"
                       >
-                        <IconCheck className="h-3.5 w-3.5 text-accent-teal" />
+                        <IconCheck className="h-3.5 w-3.5 text-status-running-text" />
                         {reading.value}
-                        <span className="text-muted-soft">{reading.unit}</span>
+                        <span className="text-muted">{reading.unit}</span>
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-xxs text-muted-soft">
-                        <span aria-hidden className="h-1.5 w-1.5 rounded-pill border border-muted-soft/70" />
+                      <span className="inline-flex items-center gap-xxs text-muted">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-pill border border-muted/70" />
                         pending
                       </span>
                     )}
@@ -173,29 +179,42 @@ function StepDetail({
   readOnly?: boolean;
 }) {
   const types = readingsRequired(step);
+  const also = requirementLines(step);
   const stepObservations = observations.filter((o) => o.protocol_step_index === step.index);
 
   return (
-    <div className="pb-xs pt-xs text-body-sm">
+    <div className="pb-xs pt-xs text-body-md">
       <dl className="grid grid-cols-[auto_1fr] gap-x-md gap-y-xxs text-[13px]">
-        <dt className="text-muted-soft">Step id</dt>
+        <dt className="text-muted">Step id</dt>
         <dd className="font-mono text-body">{step.id}</dd>
-        <dt className="text-muted-soft">Requires</dt>
+        <dt className="text-muted">Requires</dt>
         <dd className="flex flex-wrap gap-xxs">
           {types.length === 0 ? (
-            <span className="text-body">No readings, just confirmation</span>
+            <span className="text-body">{also.length ? 'No readings' : 'No readings, just confirmation'}</span>
           ) : (
             types.map((type) => (
               <span key={type} className="badge capitalize">
                 {type}
-                {unitFor(step, type) && <span className="ml-xxs normal-case">· {unitFor(step, type)}</span>}
+                {readingDetail(step, type) && <span className="ml-xxs normal-case">· {readingDetail(step, type)}</span>}
               </span>
             ))
           )}
         </dd>
+        {also.length > 0 && (
+          <>
+            <dt className="text-muted">Also</dt>
+            <dd>
+              <ul className="space-y-xxs text-body">
+                {also.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </dd>
+          </>
+        )}
         {(step.required_fields ?? []).includes('sample_id') && (
           <>
-            <dt className="text-muted-soft">Scope</dt>
+            <dt className="text-muted">Scope</dt>
             <dd className="text-body">Every sample ({samples.length})</dd>
           </>
         )}
@@ -208,7 +227,7 @@ function StepDetail({
       {stepObservations.length > 0 && (
         <ul className="mt-sm space-y-xxs">
           {stepObservations.map((o) => (
-            <li key={o.id} className="border-l-2 border-accent-teal/50 pl-xs text-[13px] text-body">
+            <li key={o.id} className="border-l-2 border-status-done-dot/50 pl-xs text-[13px] text-body">
               {o.observation}
             </li>
           ))}
@@ -216,9 +235,9 @@ function StepDetail({
       )}
 
       {state === 'current' && !readOnly && (
-        <p className="mt-sm inline-flex items-center gap-xs rounded-md bg-surface-dark px-sm py-xs text-[13px] text-on-dark">
+        <p className="mt-sm inline-flex items-center gap-xs rounded-md bg-dark-surface px-sm py-xs text-[13px] text-on-dark">
           <IconMic className="h-4 w-4 text-primary" />
-          <span className="text-on-dark-soft">Say</span>
+          <span className="text-on-dark-muted">Say</span>
           <span className="font-mono">“{sayHint(step, samples)}”</span>
         </p>
       )}
@@ -234,6 +253,7 @@ export function ProtocolSteps({
   measurements = [],
   observations = [],
   readOnly = false,
+  timerSlot,
 }: {
   steps: ProtocolStep[];
   /** Omit for a reference view with no progress. */
@@ -244,6 +264,11 @@ export function ProtocolSteps({
   observations?: StepObservation[];
   /** A record, not a bench: no "Say …" voice cue on the current step. */
   readOnly?: boolean;
+  /**
+   * The bench's step-timer controls for a step (specs/004). Rendered beside the
+   * row's toggle, never inside it: the toggle is itself a button.
+   */
+  timerSlot?: (stepIndex: number) => React.ReactNode;
 }) {
   const live = currentIndex !== undefined;
   const [open, setOpen] = useState<Set<number>>(() => new Set(live ? [currentIndex] : []));
@@ -280,7 +305,7 @@ export function ProtocolSteps({
   }
 
   if (steps.length === 0) {
-    return <p className="py-md text-body-sm text-muted-soft">This protocol has no steps yet.</p>;
+    return <p className="py-md text-body-md text-muted">This protocol has no steps yet.</p>;
   }
 
   const fill = !live
@@ -298,7 +323,7 @@ export function ProtocolSteps({
       {live && (
         <span
           aria-hidden
-          className="absolute bottom-[22px] left-[13px] top-[22px] w-[2px] origin-top rounded-pill bg-gradient-to-b from-accent-teal to-primary transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          className="absolute bottom-[22px] left-[13px] top-[22px] w-[2px] origin-top rounded-pill bg-gradient-to-b from-status-done-dot to-primary transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]"
           style={{ transform: `scaleY(${fill})` }}
         />
       )}
@@ -330,8 +355,8 @@ export function ProtocolSteps({
               key={state === 'current' ? `current-${currentIndex}` : 'static'}
               className={`min-w-0 flex-1 rounded-lg transition-colors duration-300 ${
                 state === 'current'
-                  ? 'animate-step-in border border-primary/30 bg-primary/[0.06] px-sm shadow-panel'
-                  : 'px-sm hover:bg-surface-soft/70'
+                  ? 'animate-step-in border border-primary/30 bg-primary/[0.06] px-sm '
+                  : 'px-sm hover:bg-surface-rail/70'
               }`}
             >
               <button
@@ -359,7 +384,7 @@ export function ProtocolSteps({
                       {step.name}
                     </span>
                   </span>
-                  <span className="mt-[2px] block text-[12px] text-muted-soft">
+                  <span className="mt-[2px] block text-[12px] text-muted">
                     {types.length > 0
                       ? `${types.join(', ')} for each sample`
                       : state === 'done'
@@ -368,11 +393,13 @@ export function ProtocolSteps({
                   </span>
                 </span>
                 <IconChevron
-                  className={`mt-[2px] h-4 w-4 shrink-0 text-muted-soft transition-transform duration-300 ${
+                  className={`mt-[2px] h-4 w-4 shrink-0 text-muted transition-transform duration-300 ${
                     isOpen ? 'rotate-90' : ''
                   }`}
                 />
               </button>
+
+              {timerSlot?.(step.index)}
 
               {/* grid-rows 0fr → 1fr animates height without measuring it */}
               <div

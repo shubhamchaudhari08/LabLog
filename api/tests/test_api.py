@@ -164,6 +164,19 @@ def test_unknown_argument_is_rejected_not_ignored(client, sb):
     assert sb.count("measurements") == 0
 
 
+def test_envelope_utterance_is_stored_and_args_cannot_carry_it(client, sb):
+    # voice-agent-stuck-actions: the transcript rides in the envelope, like tz,
+    # so the model never has to write it (and cannot).
+    said = "A seventeen is four point two degrees"
+    assert post_tool(client, make_token(OWNER_ID), utterance=said).json()["success"] is True
+    assert sb.rows("measurements")[0]["raw_spoken_value"] == said
+
+    args = {"sample_code": "A17", "measurement_type": "temperature", "value": 4.2, "raw_spoken_value": said}
+    body = post_tool(client, make_token(OWNER_ID), args=args).json()
+    assert body["error"] == "INVALID_ARGS"
+    assert sb.count("measurements") == 1
+
+
 def test_mutation_rejected_when_experiment_is_not_running(client, sb):
     sb.rows("experiments")[0]["status"] = "COMPLETED"
     body = post_tool(client, make_token(OWNER_ID)).json()
@@ -175,6 +188,39 @@ def test_reads_are_allowed_when_not_running(client, sb):
     sb.rows("experiments")[0]["status"] = "COMPLETED"
     body = post_tool(client, make_token(OWNER_ID), tool="get_active_experiment", args={}).json()
     assert body["success"] is True
+
+
+# specs/004-step-timers T014 — the dispatcher guards step_timer like any mutation.
+TIMER_ARGS = {"action": "start", "duration_value": 10, "duration_unit": "minutes"}
+
+
+def _timer_events(sb):
+    return [e for e in sb.rows("events") if e["event_type"].startswith("TIMER_")]
+
+
+def test_step_timer_is_refused_on_an_experiment_that_is_not_running(client, sb):
+    sb.rows("experiments")[0]["status"] = "COMPLETED"
+    body = post_tool(client, make_token(OWNER_ID), tool="step_timer", args=TIMER_ARGS).json()
+    assert body["error"] == "EXPERIMENT_NOT_RUNNING"
+    assert _timer_events(sb) == []
+
+
+def test_step_timer_without_an_experiment_is_refused(client, sb):
+    body = post_tool(client, make_token(OWNER_ID), tool="step_timer", args=TIMER_ARGS, experiment_id=None).json()
+    assert body["error"] == "EXPERIMENT_REQUIRED"
+    assert _timer_events(sb) == []
+
+
+def test_step_timer_on_another_users_experiment_is_403(client, sb):
+    response = post_tool(client, make_token(OTHER_USER_ID), tool="step_timer", args=TIMER_ARGS)
+    assert response.status_code == 403
+    assert _timer_events(sb) == []
+
+
+def test_step_timer_through_the_dispatcher(client, sb):
+    body = post_tool(client, make_token(OWNER_ID), tool="step_timer", args=TIMER_ARGS).json()
+    assert body["success"] is True and body["data"]["timer"]["duration_seconds"] == 600
+    assert len(_timer_events(sb)) == 1
 
 
 def test_tool_failures_use_http_200(client, sb):
@@ -233,7 +279,7 @@ def test_bootstrap_returns_the_contract_shape(client, sb, fake_token):
     assert config["input"]["format"]["encoding"] == "audio/pcm"
     assert config["output"]["format"]["encoding"] == "audio/pcm"
     assert config["input"]["turn_detection"]["interrupt_response"] is True
-    assert len(config["tools"]) == 11
+    assert len(config["tools"]) == 12  # the MVP eleven + specs/004 step_timer (the cap)
     assert "STAB-104" in config["system_prompt"]
     assert config["greeting"]
 
@@ -292,3 +338,28 @@ def test_unsigned_token_is_rejected(client, sb):
     assert post_tool(client, token).status_code == 401
     assert sb.count("measurements") == 0
 
+
+
+def test_model_level_validation_errors_are_a_tool_failure_not_a_500(client, sb):
+    # A model_validator's ValueError used to ride in errors()[].ctx and fail JSON
+    # serialisation. A duration without its unit is one such rejection (specs/004).
+    response = post_tool(
+        client, make_token(OWNER_ID), tool="step_timer",
+        args={"action": "start", "duration_value": 10},
+        experiment_id=None,
+    )
+    assert response.status_code == 200
+    assert response.json()["error"] == "INVALID_ARGS"
+
+
+def test_nested_samples_argument_is_refused(client, sb):
+    # specs/007 R-716: types ride in test_samples/control_samples; `samples` is gone.
+    before = sb.count("experiments")
+    response = post_tool(
+        client, make_token(OWNER_ID), tool="create_experiment",
+        args={"name": "x", "confirmed": True, "samples": [{"code": "A17"}]},
+        experiment_id=None,
+    )
+    assert response.status_code == 200
+    assert response.json()["error"] == "INVALID_ARGS"
+    assert sb.count("experiments") == before

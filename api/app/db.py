@@ -117,6 +117,20 @@ def latest_measurement(
     return rows[0] if rows else None
 
 
+def effective(measurements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The effective readings: rows nothing superseded. A correction chain of any
+    length leaves exactly one of these per reading (specs/007 R-708)."""
+    return [m for m in measurements if m.get("superseded_by") is None]
+
+
+def correction_count(measurements: list[dict[str, Any]]) -> int:
+    """One per correction operation: each correction supersedes exactly one row.
+
+    Counted from supersession, not `correction_reason`, which a caller can leave blank.
+    """
+    return sum(1 for m in measurements if m.get("superseded_by") is not None)
+
+
 def completion_summary(sb, experiment_id: str) -> dict[str, Any]:
     """Figures for the completion summary, computed from stored rows.
 
@@ -137,9 +151,9 @@ def completion_summary(sb, experiment_id: str) -> dict[str, Any]:
     deviations = (
         sb.table("deviations").select("id").eq("experiment_id", experiment_id).execute().data or []
     )
+    samples = sb.table("samples").select("id").eq("experiment_id", experiment_id).execute().data or []
 
-    live = [m for m in measurements if m.get("superseded_by") is None]
-    corrections = [m for m in measurements if m.get("correction_reason")]
+    live = effective(measurements)
 
     duration_minutes = None
     started, completed = experiment.get("started_at"), experiment.get("completed_at")
@@ -153,8 +167,9 @@ def completion_summary(sb, experiment_id: str) -> dict[str, Any]:
 
     return {
         "duration_minutes": duration_minutes,
+        "sample_count": len(samples),
         "measurement_count": len(live),
-        "correction_count": len(corrections),
+        "correction_count": correction_count(measurements),
         "observation_count": len(observations),
         "deviation_count": len(deviations),
         "samples_measured": len({m.get("sample_id") for m in live if m.get("sample_id")}),
