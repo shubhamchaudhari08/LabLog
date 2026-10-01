@@ -9,7 +9,7 @@ audited measurement lands in the database and on screen, while the agent tells y
 what was actually stored.
 
 [**▶ Live demo**](https://lablog-web.vercel.app) ·
-[**🎬 Demo video**](presentation.mp4) ·
+[**🎬 Demo video**](https://drive.google.com/file/d/16kHlZj2fbJEPZmDReh4kpDFABFgfMgLn/view?usp=sharing) ·
 [**📑 Slides (PDF)**](LabLog_Presentation%20Hackathon.pdf)
 
 ![Next.js](https://img.shields.io/badge/Next.js_14-000?logo=nextdotjs)
